@@ -21,6 +21,7 @@ import db
 import faces
 import indexer
 import mailer
+import netutil
 
 app = Flask(__name__)
 app.config.update(
@@ -66,6 +67,30 @@ def ip():
 
 def err(msg, status=400):
     return jsonify(ok=False, error=msg), status
+
+
+@app.before_request
+def _network_guard():
+    # Only the networks / VLANs you list may reach the app; the admin page
+    # can be limited further (e.g. to your office VLAN only).
+    addr = ip()
+    if not netutil.ip_allowed(addr, config.ALLOWED_NETWORKS):
+        abort(403)
+    if request.path.startswith("/admin") and not netutil.ip_allowed(addr, config.ADMIN_NETWORKS):
+        abort(404)
+
+
+def guest_link(code):
+    """Link to share with guests: your domain if set, else this computer's
+    LAN address (never 127.0.0.1, which only works on this computer)."""
+    path = url_for("event_page", code=code)
+    if config.PUBLIC_URL:
+        return config.PUBLIC_URL + path
+    host = request.host
+    name = host.rsplit(":", 1)[0]
+    if name in ("127.0.0.1", "localhost"):
+        host = host.replace(name, netutil.primary_ip(), 1)
+    return f"{request.scheme}://{host}{path}"
 
 
 @app.before_request
@@ -439,7 +464,7 @@ def admin():
         e["faces"] = c.execute("SELECT COUNT(*) FROM faces WHERE event_id=?", (e["id"],)).fetchone()[0]
         e["progress"] = indexer.progress.get(e["id"])
         e["folder_list"] = [(f, Path(f).is_dir()) for f in db.split_folders(e["folders"])]
-        e["link"] = url_for("event_page", code=e["code"], _external=True)
+        e["link"] = guest_link(e["code"])
         events.append(e)
     pending = c.execute(
         "SELECT s.id, s.email, s.created_at, e.name, "
@@ -537,13 +562,30 @@ def admin_selfie(sid):
     return send_file(p, mimetype="image/jpeg")
 
 
-if __name__ == "__main__":
-    host, port = os.environ.get("HOST", "127.0.0.1"), int(os.environ.get("PORT", "8000"))
+def main():
+    host = config.HOST
+    port = netutil.free_port(host, config.PORT)
+    if port != config.PORT:
+        print(f"Port {config.PORT} is busy - using port {port} instead.")
+    scheme = "https" if config.HTTPS else "http"
     if config.DEV_MODE:
         print("!! DEV_MODE is ON - for testing on your own computer only !!")
-    print(f"Admin page: http://{host}:{port}/admin")
-    try:
-        from waitress import serve
-        serve(app, host=host, port=port, threads=8)
-    except ImportError:
-        app.run(host=host, port=port)
+    print(f"\nAdmin page (on this computer): {scheme}://127.0.0.1:{port}/admin")
+    if host in ("0.0.0.0", ""):
+        for addr in netutil.local_ips():
+            print(f"On your LAN / VLAN:            {scheme}://{addr}:{port}/admin")
+        print(f"If other devices cannot connect, allow TCP port {port} in the firewall.\n")
+    if config.HTTPS:
+        cert, key = netutil.ensure_cert(config.TLS_DIR, config.TLS_NAMES)
+        from werkzeug.serving import run_simple
+        run_simple(host, port, app, threaded=True, ssl_context=(str(cert), str(key)))
+    else:
+        try:
+            from waitress import serve
+            serve(app, host=host, port=port, threads=8)
+        except ImportError:
+            app.run(host=host, port=port, threaded=True)
+
+
+if __name__ == "__main__":
+    main()

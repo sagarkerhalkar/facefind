@@ -10,7 +10,9 @@ Nobody else can open or download them.
 2. Double-click **start.bat**. The first run installs what is needed, downloads
    the face models (about 40 MB), and opens the `.env` settings file.
 3. Fill in `.env` (see below), save, and double-click **start.bat** again.
-4. Open `http://127.0.0.1:8000/admin` and sign in with your admin password.
+4. The window prints the addresses, for example
+   `https://192.168.1.50:8443/admin`. Open it and sign in with your admin
+   password.
 
 On Mac or Linux use `./start.sh` instead.
 
@@ -53,15 +55,46 @@ If a drive is switched off, its photos stay in the index and work again when
 it is back. Photos never leave your drives; originals are read only at the
 moment a verified guest downloads them.
 
-## Putting it online for guests
+## Using it on your LAN and VLANs
 
-Guests need an `https://` address (phones refuse camera access without it).
-The simplest safe way is a free **Cloudflare Tunnel** to
-`http://127.0.0.1:8000` – no router changes, HTTPS included. Then set
-`DEV_MODE=0` and `TRUST_PROXY=1`, restart, and share the guest link (or a QR
-code of it) from the admin page.
+The app listens on every network card of the computer and serves **HTTPS**
+by itself. Settings are in `.env`:
 
-Never expose port 8000 directly to the internet without HTTPS.
+| Setting | Meaning |
+|---|---|
+| `PORT` | First port to try (8443). If it is busy, the app takes the next free port and prints it |
+| `HOST` | `0.0.0.0` = whole LAN, `127.0.0.1` = this computer only |
+| `HTTPS` | `1` = built-in HTTPS with an automatic certificate |
+| `ALLOWED_NETWORKS` | Networks / VLANs allowed to open the app, e.g. `192.168.10.0/24,192.168.20.0/24`. Empty = any |
+| `ADMIN_NETWORKS` | Networks allowed to open `/admin`, e.g. only your office VLAN |
+
+Three things to do once:
+
+1. **Windows Firewall:** allow the port. In an administrator Command Prompt:
+   `netsh advfirewall firewall add rule name="FaceFind" dir=in action=allow protocol=TCP localport=8443`
+   (use the port the window printed).
+2. **VLANs:** if guests are on a different VLAN than this computer, add a rule
+   on your router / L3 switch / firewall that lets the guest VLAN reach this
+   computer's IP on that one TCP port. Nothing else needs to be opened.
+3. **Give this computer a fixed IP** (DHCP reservation), so the guest link and
+   QR code keep working.
+
+**About the browser warning:** the LAN certificate is made by the app itself,
+so each device shows "connection is not private" the first time. Press
+*Advanced → Proceed*; the connection is still encrypted and the camera works.
+To remove the warning on your own office devices, install `data/tls/cert.pem`
+as a trusted certificate. For guests, the warning goes away completely once
+you move to a domain (below).
+
+## Hosting on a domain later
+
+1. Point the domain to the server and put Caddy, Nginx or a Cloudflare Tunnel
+   in front; it provides a real HTTPS certificate.
+2. In `.env` set `HTTPS=0`, `TRUST_PROXY=1`, `HOST=127.0.0.1`,
+   `PUBLIC_URL=https://photos.yourdomain.com`, and `DEV_MODE=0`.
+3. Restart. Guest links on the admin page now use the domain.
+
+Never expose the app to the internet over plain `http://`.
 
 ## What protects the photos
 

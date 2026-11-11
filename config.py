@@ -57,8 +57,20 @@ ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
 # DEV_MODE: OTP is printed in the server window when no mail is configured,
 # and cookies work over plain http. NEVER switch on for real guests.
 DEV_MODE = _b("DEV_MODE")
-COOKIE_SECURE = not DEV_MODE
 TRUST_PROXY = _b("TRUST_PROXY")
+
+# --- network -----------------------------------------------------------
+import netutil  # noqa: E402
+
+HOST = os.environ.get("HOST", "0.0.0.0")        # 0.0.0.0 = reachable on the LAN
+PORT = int(os.environ.get("PORT", "8443"))      # if busy, the next free port is used
+HTTPS = _b("HTTPS", "1")                        # built-in HTTPS for the LAN
+TLS_NAMES = os.environ.get("TLS_NAMES", "").split(",")   # extra names for the certificate
+TLS_DIR = DATA_DIR / "tls"
+PUBLIC_URL = os.environ.get("PUBLIC_URL", "").rstrip("/")  # e.g. https://photos.mydomain.com
+ALLOWED_NETWORKS = netutil.parse_networks(os.environ.get("ALLOWED_NETWORKS", ""))
+ADMIN_NETWORKS = netutil.parse_networks(os.environ.get("ADMIN_NETWORKS", ""))
+COOKIE_SECURE = HTTPS or not DEV_MODE
 
 SMTP_HOST = os.environ.get("SMTP_HOST", "")
 SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))

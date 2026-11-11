@@ -140,4 +140,19 @@ adm.post(f"/admin/events/{ev['id']}/toggle", data={"csrf": csrf})
 assert A.app.test_client().get("/e/" + code).status_code == 404
 hd = adm.get("/admin").headers
 assert "frame-ancestors 'none'" in hd["Content-Security-Policy"] and hd["Cache-Control"] == "no-store"
+# LAN / VLAN rules
+import netutil
+config.ALLOWED_NETWORKS = netutil.parse_networks("192.168.10.0/24, 192.168.20.0/24")
+config.ADMIN_NETWORKS = netutil.parse_networks("192.168.10.0/24")
+def from_ip(addr, path): return A.app.test_client().get(path, environ_base={"REMOTE_ADDR": addr}).status_code
+assert from_ip("192.168.30.7", "/e/x") == 403            # VLAN not on the list
+assert from_ip("192.168.20.7", "/e/x") == 404            # allowed guest VLAN (404 = closed event page)
+assert from_ip("192.168.20.7", "/admin/login") == 404    # guest VLAN cannot see admin
+assert from_ip("192.168.10.7", "/admin/login") == 200    # office VLAN can
+config.ALLOWED_NETWORKS = config.ADMIN_NETWORKS = []
+cert, key = netutil.ensure_cert(tmp / "tls", ["photos.lan"])
+assert cert.exists() and netutil.ensure_cert(tmp / "tls", ["photos.lan"])[0].stat().st_mtime == cert.stat().st_mtime
+import socket; busy = socket.socket(); busy.bind(("127.0.0.1", 0)); bp = busy.getsockname()[1]
+assert netutil.free_port("127.0.0.1", bp) != bp; busy.close()
+print("ok  VLAN allow-list, admin VLAN, certificate, busy-port fallback")
 print("ok  path escape blocked, sign-out erases, closed link is dead\nALL TESTS PASSED")
