@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ event.name if event else "Link not found" }} - {{ brand }}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<header><span class="brand">{{ brand }}</span>{% if event %}<span class="evname">{{ event.name }}</span>{% endif %}</header>
+<main id="app" data-code="{{ event.code if event else '' }}">
+{% if not event %}
+  <section class="card"><h1>Link not found</h1>
+  <p>This photo link is not valid or the event is closed. Please ask the photographer for a new link.</p></section>
+{% else %}
+  <ol class="steps"><li id="s1">Email</li><li id="s2">Code</li><li id="s3">Selfie</li><li id="s4">Photos</li></ol>
+  <p id="msg" class="msg" role="alert" hidden></p>
+
+  <section class="card" id="step-email" hidden>
+    <h1>Find your photos</h1>
+    <p>Enter your email. We send a one-time code to make sure the photos reach only you.</p>
+    <form id="f-email">
+      <label for="email">Email address</label>
+      <input id="email" type="email" autocomplete="email" required placeholder="you@example.com">
+      <label class="check"><input id="consent" type="checkbox" required>
+        <span>I agree that my selfie is used once to find my face in this event's photos. The selfie is not kept after matching.</span></label>
+      <button type="submit">Send code</button>
+    </form>
+  </section>
+
+  <section class="card" id="step-otp" hidden>
+    <h1>Enter the code</h1>
+    <p>We sent a 6-digit code to <b id="otp-email"></b>. It is valid for 5 minutes.</p>
+    <form id="f-otp">
+      <label for="otp">Verification code</label>
+      <input id="otp" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required>
+      <button type="submit">Verify</button>
+      <button type="button" class="link" id="otp-back">Use a different email</button>
+    </form>
+  </section>
+
+  <section class="card" id="step-selfie" hidden>
+    <h1>Take a selfie</h1>
+    <p>Face the camera alone, in good light.</p>
+    <div class="cam"><video id="video" autoplay playsinline muted></video></div>
+    <button id="snap" type="button">Take selfie and find my photos</button>
+    <canvas id="canvas" hidden></canvas>
+  </section>
+
+  <section class="card" id="step-pending" hidden>
+    <h1>Waiting for approval</h1>
+    <p>We found photos for you. The photographer checks each request before photos are released. Keep this page open - it updates by itself.</p>
+  </section>
+
+  <section id="step-gallery" hidden>
+    <div class="bar">
+      <h1 id="g-title"></h1>
+      <div><button id="dl-all" type="button">Download all</button>
+      <button id="retry" type="button" class="ghost">New selfie</button>
+      <button id="forget" type="button" class="ghost">Sign out and erase</button></div>
+    </div>
+    <p id="g-empty" class="card" hidden>No photos matched this selfie yet. The photographer may still be uploading - try again later, or take a clearer selfie.</p>
+    <div id="grid" class="grid"></div>
+  </section>
+{% endif %}
+</main>
+<footer>Photos are shown only to the verified email address. Every download is logged.</footer>
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

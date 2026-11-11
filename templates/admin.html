@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Admin - {{ brand }}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"></head>
+<body><header><span class="brand">{{ brand }}</span><span class="evname">Admin</span>
+<form class="inline" method="post" action="{{ url_for('admin_logout') }}"><button class="small ghost" type="submit">Sign out</button></form></header>
+<main>
+{% if msg %}<p class="note">{{ msg }}</p>{% endif %}
+
+{% if pending %}
+<h2>Requests waiting for your approval</h2>
+<div class="card wide scroll"><table>
+<tr><th>Selfie</th><th>Email</th><th>Event</th><th>Photos matched</th><th></th></tr>
+{% for p in pending %}<tr>
+<td><img class="selfie" src="{{ url_for('admin_selfie', sid=p.id) }}" alt="Selfie sent by {{ p.email }}"></td>
+<td>{{ p.email }}</td><td>{{ p.name }}</td><td>{{ p.n }}</td>
+<td><form class="inline" method="post" action="{{ url_for('admin_request', sid=p.id, action='approve') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small">Approve</button></form>
+<form class="inline" method="post" action="{{ url_for('admin_request', sid=p.id, action='reject') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small danger">Reject</button></form></td>
+</tr>{% endfor %}</table></div>
+{% endif %}
+
+<h2>New event / album</h2>
+<form class="card wide" method="post" action="{{ url_for('admin_event_create') }}">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<div class="row">
+<div><label for="name">Name</label><input id="name" name="name" type="text" required placeholder="Sharma wedding, 10 Nov"></div>
+</div>
+<label for="folders">Photo folders - one per line, from as many drives as you like</label>
+<textarea id="folders" name="folders" rows="4" required placeholder="D:\Photos\Sharma&#10;E:\Backup\Sharma&#10;G:\My Drive\Sharma wedding&#10;\\NAS\events\Sharma"></textarea>
+<label class="check"><input type="checkbox" name="approval" checked><span>I approve each guest before photos are released (safest)</span></label>
+<button type="submit">Create</button>
+</form>
+
+<h2>Events</h2>
+<div class="card wide scroll"><table>
+<tr><th>Event</th><th>Guest link (share this / make a QR)</th><th>Photos / faces</th><th>Scan</th><th>Settings</th></tr>
+{% for e in events %}<tr>
+<td><b>{{ e.name }}</b>
+{% for f, up in e.folder_list %}<br><small>{{ f }}{% if not up %} <b class="off">(drive not connected)</b>{% endif %}</small>{% endfor %}
+<details><summary>Add / change drives</summary>
+<form method="post" action="{{ url_for('admin_event_action', eid=e.id, action='folders') }}"><input type="hidden" name="csrf" value="{{ csrf }}">
+<label for="fl{{ e.id }}">Folders, one per line</label>
+<textarea id="fl{{ e.id }}" name="folders" rows="4">{{ e.folders }}</textarea><button class="small">Save folders</button></form></details></td>
+<td><code>{{ e.link }}</code></td>
+<td>{{ e.photos }} / {{ e.faces }}</td>
+<td>{% if e.progress %}{{ e.progress.state }} {{ e.progress.done }}/{{ e.progress.total }}{% if e.progress.error %}<br><small>{{ e.progress.error }}</small>{% endif %}<br>{% endif %}
+<form class="inline" method="post" action="{{ url_for('admin_event_action', eid=e.id, action='index') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small">Scan photos</button></form>
+<a href="{{ url_for('admin') }}">refresh</a></td>
+<td>
+<form class="inline" method="post" action="{{ url_for('admin_event_action', eid=e.id, action='toggle') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small ghost">{{ "Close link" if e.active else "Open link" }}</button></form>
+<form class="inline" method="post" action="{{ url_for('admin_event_action', eid=e.id, action='approval') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small ghost">Approval: {{ "ON" if e.require_approval else "OFF" }}</button></form>
+</td></tr>{% else %}<tr><td colspan="5">No events yet.</td></tr>{% endfor %}
+</table></div>
+
+<h2>Activity log (latest 150)</h2>
+<div class="card wide scroll"><table>
+<tr><th>Time</th><th>Email</th><th>Action</th><th>Detail</th><th>IP</th></tr>
+{% for a in log %}<tr><td>{{ fmt(a.ts) }}</td><td>{{ a.email or "" }}</td><td>{{ a.action }}</td><td>{{ a.detail }}</td><td>{{ a.ip }}</td></tr>{% endfor %}
+</table></div>
+</main></body></html>
