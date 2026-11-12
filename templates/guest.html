@@ -13,13 +13,17 @@
   <section class="card"><h1>Link not found</h1>
   <p>This photo link is not valid or the event is closed. Please ask the photographer for a new link.</p></section>
 {% else %}
-  <ol class="steps"><li id="s1">Email</li><li id="s2">Code</li><li id="s3">Selfie</li><li id="s4">Photos</li></ol>
+  <ol class="steps"><li id="s1">Email</li><li id="s2">Code</li><li id="s3">{{ "Events and selfie" if portal else "Selfie" }}</li><li id="s4">Photos</li></ol>
   <p id="msg" class="msg" role="alert" hidden></p>
 
   <section class="card" id="step-email" hidden>
     <h1>Find your photos</h1>
     <p>Enter your email. We send a one-time code to make sure the photos reach only you.{% if portal %} You sign in once and then find your photos from every event you attended.{% endif %}</p>
     <form id="f-email">
+      <label for="gname">Your name</label>
+      <input id="gname" type="text" autocomplete="name" required minlength="2" maxlength="80">
+      <label for="phone">Phone number</label>
+      <input id="phone" type="tel" autocomplete="tel" inputmode="tel" required pattern="[+0-9 ()\-]{7,20}" placeholder="98765 43210">
       <label for="email">Email address</label>
       <input id="email" type="email" autocomplete="email" required placeholder="you@example.com">
       <label class="check"><input id="consent" type="checkbox" required>
@@ -39,13 +43,21 @@
     </form>
   </section>
 
-  <section class="card" id="step-selfie" hidden>
-    <h1>Take a selfie</h1>
-    {% if portal %}<p>Choose the dates of the events you attended. All events in these dates are searched.</p>
+  <section class="card" id="step-events" hidden>
+    <h1 id="ev-hello">Choose your events</h1>
+    <p>Choose the dates, then tick the events you attended.</p>
     <div class="row dates">
       <div><label for="d-from">From</label><input id="d-from" type="date" value="{{ month_ago }}" max="{{ today }}" required></div>
       <div><label for="d-to">To</label><input id="d-to" type="date" value="{{ today }}" max="{{ today }}" required></div>
-    </div>{% endif %}
+    </div>
+    <button type="button" class="ghost" id="ev-load">Show events</button>
+    <fieldset id="ev-box" hidden><legend>Events in these dates</legend><div id="ev-list"></div></fieldset>
+    <button type="button" id="ev-next" hidden>Continue to selfie</button>
+    <button type="button" class="link" id="ev-saved" hidden>My saved photos</button>
+  </section>
+
+  <section class="card" id="step-selfie" hidden>
+    <h1>Take a selfie</h1>
     <p>Look straight at the camera, alone, in good light. Avoid glare on glasses.</p>
     <div class="cam"><video id="video" autoplay playsinline muted></video></div>
     <button id="snap" type="button">Take selfie and find my photos</button>
@@ -63,10 +75,12 @@
     <div class="bar">
       <h1 id="g-title"></h1>
       <div><button id="dl-all" type="button">Download all</button>
-      <button id="retry" type="button" class="ghost">New selfie</button>
-      <button id="forget" type="button" class="ghost">Sign out and erase</button></div>
+      <button id="show-saved" type="button" class="ghost">My saved photos</button>
+      <button id="show-found" type="button" class="ghost" hidden>Back to results</button>
+      <button id="retry" type="button" class="ghost">New search</button>
+      <button id="forget" type="button" class="ghost">Sign out</button></div>
     </div>
-    <p id="g-empty" class="card" hidden>No photos matched this selfie yet. The photographer may still be uploading - try again later, or take a clearer selfie.</p>
+    <p id="g-empty" class="card" hidden></p>
     <div id="grid" class="grid"></div>
   </section>
 {% endif %}

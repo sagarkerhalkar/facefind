@@ -30,6 +30,14 @@ CREATE TABLE IF NOT EXISTS matches(
   PRIMARY KEY(session_id, photo_id));
 CREATE INDEX IF NOT EXISTS matches_photo ON matches(photo_id);
 CREATE TABLE IF NOT EXISTS kv(k TEXT PRIMARY KEY, v TEXT);
+CREATE TABLE IF NOT EXISTS users(
+  email TEXT PRIMARY KEY, name TEXT, phone TEXT, created_at REAL, last_login REAL);
+CREATE TABLE IF NOT EXISTS bookmarks(
+  email TEXT, photo_id INTEGER, created_at REAL, PRIMARY KEY(email, photo_id));
+CREATE TABLE IF NOT EXISTS downloads(
+  id INTEGER PRIMARY KEY, ts REAL, email TEXT, photo_id INTEGER, event_id INTEGER,
+  relpath TEXT, ip TEXT);
+CREATE INDEX IF NOT EXISTS downloads_email ON downloads(email);
 CREATE TABLE IF NOT EXISTS audit(
   id INTEGER PRIMARY KEY, ts REAL, email TEXT, event_id INTEGER,
   action TEXT, detail TEXT, ip TEXT);
@@ -51,7 +59,8 @@ def init():
     # "version stamp" Drive gives it, so unchanged photos are not scanned twice.
     for table, col in (("photos", "ref"), ("photos", "stamp"),
                        ("events", "event_date"),            # day of the event, YYYY-MM-DD
-                       ("sessions", "date_from"), ("sessions", "date_to")):
+                       ("sessions", "date_from"), ("sessions", "date_to"),
+                       ("otps", "name"), ("otps", "phone")):
         if col not in {r[1] for r in con.execute(f"PRAGMA table_info({table})")}:
             con.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT DEFAULT ''")
     con.commit()

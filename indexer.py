@@ -75,7 +75,8 @@ def _drive_image(info):
         need = min(1200, config.SCAN_SIDE, int(original * 0.9)) if original else 1000
         if max(img.shape[:2]) >= need:
             return img, "small"
-    return faces.decode_fast(gdrive.fetch_full(info["id"])), "full"
+    ext = Path(info.get("name", "")).suffix
+    return faces.load(gdrive.fetch_full(info["id"]), ext), "full"
 
 
 def _embed_file(job):
@@ -86,7 +87,7 @@ def _embed_file(job):
         if job["info"] is not None:
             img, job["how"] = _drive_image(job["info"])
         else:
-            img, job["how"] = faces.decode_fast(job["path"].read_bytes()), "file"
+            img, job["how"] = faces.load(job["path"].read_bytes(), job["path"].suffix), "file"
         t1 = time.time()
         job["t_read"] = t1 - t0
         if img is None:
@@ -145,6 +146,7 @@ def drop_preview(pid):
 def _forget_photo(con, pid):
     con.execute("DELETE FROM faces WHERE photo_id=?", (pid,))
     con.execute("DELETE FROM matches WHERE photo_id=?", (pid,))
+    con.execute("DELETE FROM bookmarks WHERE photo_id=?", (pid,))
     con.execute("DELETE FROM photos WHERE id=?", (pid,))
     drop_preview(pid)
 
@@ -238,8 +240,8 @@ def index_event(event_id):
                 _forget_photo(con, pid)
         if not st["total"] and not notes:
             seen = ", ".join(f"{n} {ext} files" for ext, n in others.most_common(4))
-            notes.append("No JPG / PNG / WEBP photos were found in the folder"
-                         + (f" (it has {seen}, which this app cannot read)." if seen
+            notes.append("No photos were found in the folder"
+                         + (f" (it has {seen}, which are not photos)." if seen
                             else ". Check that you chose the folder that holds the photos."))
         if st["bad_count"]:
             notes.append(f"{st['bad_count']} files could not be read (last: {st['bad']}).")

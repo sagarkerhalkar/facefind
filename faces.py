@@ -99,6 +99,65 @@ def decode_fast(data: bytes, want=None):
     return img
 
 
+def _embedded_jpeg(data):
+    """Every camera RAW file carries a ready JPEG picture inside it. This
+    finds the largest one - no extra software needed."""
+    best, pos, tried = None, 0, 0
+    while tried < 12:
+        pos = data.find(b"\xff\xd8\xff", pos)
+        if pos < 0:
+            break
+        tried += 1
+        img = cv2.imdecode(np.frombuffer(data, np.uint8, offset=pos), cv2.IMREAD_COLOR)
+        if img is not None and (best is None or img.size > best.size):
+            best = img
+        pos += 3
+    return best
+
+
+def _raw(data):
+    try:
+        import rawpy
+    except ImportError:
+        return _embedded_jpeg(data)
+    try:
+        with rawpy.imread(io.BytesIO(data)) as raw:
+            try:
+                thumb = raw.extract_thumb()
+                if thumb.format == rawpy.ThumbFormat.JPEG:
+                    img = decode_fast(bytes(thumb.data))
+                    if img is not None and max(img.shape[:2]) >= 1000:
+                        return img
+            except Exception:
+                pass
+            rgb = raw.postprocess(half_size=True, use_camera_wb=True)
+            return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+    except Exception:
+        return _embedded_jpeg(data)
+
+
+def _heic(data):
+    try:
+        import pillow_heif
+    except ImportError:
+        raise RuntimeError("HEIC photos need the 'pillow-heif' package - run start.bat again")
+    pillow_heif.register_heif_opener()
+    from PIL import ImageOps
+    im = ImageOps.exif_transpose(Image.open(io.BytesIO(data))).convert("RGB")
+    return cv2.cvtColor(np.asarray(im), cv2.COLOR_RGB2BGR)
+
+
+def load(data: bytes, ext=""):
+    """Any supported photo file -> picture for scanning (or None).
+    JPG, PNG, WEBP, BMP, TIFF directly; HEIC (iPhone); camera RAW files."""
+    ext = ext.lower()
+    if ext in config.HEIC_EXT:
+        return _heic(data)
+    if ext in config.RAW_EXT:
+        return _raw(data)
+    return decode_fast(data)
+
+
 def decode(data: bytes):
     """bytes -> BGR image (EXIF rotation applied) or None."""
     return cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)

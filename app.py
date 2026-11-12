@@ -44,9 +44,24 @@ if config.TRUST_PROXY:
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
 db.init()
+
+
+def _load_settings():
+    """Settings changed on the admin page are kept in the database."""
+    c = db.connect()
+    try:
+        v = db.kv_get(c, "match_threshold")
+        if v:
+            config.MATCH_THRESHOLD = float(v)
+    finally:
+        c.close()
+
+
+_load_settings()
 signer = URLSafeTimedSerializer(config.SECRET_KEY, salt="download")
 EMAIL_RE = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]{2,}")
 DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+PHONE_RE = re.compile(r"\+?\d{7,15}")
 # The general link: not one album, but every open album in the guest's dates.
 PORTAL = {"id": 0, "name": config.BRAND, "code": ""}
 COOKIE = "ff_session"
@@ -161,13 +176,27 @@ def guest():
 
 
 def allowed(s, photo_id):
-    """A guest may touch a photo only if THEIR selfie matched it."""
-    if s["status"] not in ("matched", "approved"):
-        return None
-    return con().execute(
-        "SELECT p.*, e.folders FROM matches m JOIN photos p ON p.id=m.photo_id "
-        "JOIN events e ON e.id=p.event_id WHERE m.session_id=? AND m.photo_id=?",
-        (s["id"], photo_id)).fetchone()
+    """A guest may touch a photo only if THEIR selfie matched it now, or if
+    they saved it earlier (which was only possible after such a match) and
+    are signed in with the same verified email."""
+    c = con()
+    if s["status"] in ("matched", "approved"):
+        row = c.execute(
+            "SELECT p.*, e.folders FROM matches m JOIN photos p ON p.id=m.photo_id "
+            "JOIN events e ON e.id=p.event_id WHERE m.session_id=? AND m.photo_id=?",
+            (s["id"], photo_id)).fetchone()
+        if row:
+            return row
+    return c.execute(
+        "SELECT p.*, e.folders FROM bookmarks b JOIN photos p ON p.id=b.photo_id "
+        "JOIN events e ON e.id=p.event_id WHERE b.email=? AND b.photo_id=? AND e.active=1",
+        (s["email"], photo_id)).fetchone()
+
+
+def record_download(c, s, row):
+    """The admin's record: who took which photo, and when."""
+    c.execute("INSERT INTO downloads(ts,email,photo_id,event_id,relpath,ip) VALUES(?,?,?,?,?,?)",
+              (time.time(), s["email"], row["id"], row["event_id"], row["relpath"], ip()))
 
 
 def real_path(folders, root, relpath):
@@ -196,18 +225,20 @@ def preview_file(row):
             if not row["ref"]:
                 g.why = "scanned by an older version - press 'Scan again' and wait for green"
                 abort(404)
+            ext = ""
             try:
-                data = (gdrive.fetch_small({"id": row["ref"]}, 1200)
-                        or gdrive.fetch_full(row["ref"]))
+                data = gdrive.fetch_small({"id": row["ref"]}, 1200)    # a JPEG made by Google
+                if not data:
+                    data, ext = gdrive.fetch_full(row["ref"]), Path(row["relpath"]).suffix
             except gdrive.DriveError as e:
                 g.why = f"Google Drive: {e}"
                 abort(503)
-            make_preview(io.BytesIO(data), dest)
+            make_preview(io.BytesIO(data), dest, ext)
         else:
             g.why = "file not found - the drive is not connected, or the photo was moved"
             src = old_copy(row) or real_path(row["folders"], row["root"], row["relpath"])
-            make_preview(src, dest)
-    except (OSError, ValueError) as e:        # unreadable or damaged picture
+            make_preview(src, dest, Path(row["relpath"]).suffix)
+    except (OSError, ValueError, RuntimeError) as e:        # unreadable or damaged picture
         g.why = f"the picture could not be opened ({e})"
         abort(404)
     return dest
@@ -235,8 +266,15 @@ def drive_download(ref, name):
         mimetype=r.headers.get("Content-Type") or "application/octet-stream")
 
 
-def make_preview(src, dest):
-    im = ImageOps.exif_transpose(Image.open(src)).convert("RGB")
+def make_preview(src, dest, ext=""):
+    if ext.lower() in config.HEIC_EXT | config.RAW_EXT:      # iPhone / camera RAW files
+        import numpy as np
+        bgr = faces.load(src.read() if hasattr(src, "read") else Path(src).read_bytes(), ext)
+        if bgr is None:
+            raise ValueError("no picture could be read from this file")
+        im = Image.fromarray(np.ascontiguousarray(bgr[:, :, ::-1]))
+    else:
+        im = ImageOps.exif_transpose(Image.open(src)).convert("RGB")
     im.thumbnail((config.PREVIEW_SIDE, config.PREVIEW_SIDE))
     layer = Image.new("RGBA", im.size, (0, 0, 0, 0))
     d = ImageDraw.Draw(layer)
@@ -286,6 +324,12 @@ def otp_send():
         return err("This link is not valid.", 404)
     if len(email) > 254 or not EMAIL_RE.fullmatch(email):
         return err("Please enter a valid email address.")
+    name = " ".join(str(d.get("name") or "").split())[:80]
+    phone = re.sub(r"[\s().-]", "", str(d.get("phone") or ""))
+    if len(name) < 2:
+        return err("Please enter your name.")
+    if not PHONE_RE.fullmatch(phone):
+        return err("Please enter your phone number (digits only, with country code if outside India).")
     if d.get("consent") is not True:
         return err("Please accept the face-matching consent to continue.")
     c, now = con(), time.time()
@@ -299,9 +343,10 @@ def otp_send():
     code = f"{secrets.randbelow(10**6):06d}"
     c.execute("UPDATE otps SET used=1 WHERE email=? AND event_id=? AND used=0",
               (email, ev["id"]))
-    c.execute("INSERT INTO otps(email,event_id,code_hash,expires_at,created_at,ip) "
-              "VALUES(?,?,?,?,?,?)",
-              (email, ev["id"], h(f"{email}|{ev['id']}|{code}"), now + config.OTP_TTL, now, ip()))
+    c.execute("INSERT INTO otps(email,event_id,code_hash,expires_at,created_at,ip,name,phone) "
+              "VALUES(?,?,?,?,?,?,?,?)",
+              (email, ev["id"], h(f"{email}|{ev['id']}|{code}"), now + config.OTP_TTL, now, ip(),
+               name, phone))
     db.audit(c, "otp_sent", email, ev["id"], ip=ip())
     c.commit()
     try:
@@ -341,7 +386,10 @@ def otp_verify():
     c.execute("INSERT INTO sessions(token_hash,email,event_id,created_at,expires_at,ip) "
               "VALUES(?,?,?,?,?,?)",
               (h(token), email, ev["id"], now, now + config.SESSION_TTL, ip()))
-    db.audit(c, "verified", email, ev["id"], ip=ip())
+    c.execute("INSERT INTO users(email,name,phone,created_at,last_login) VALUES(?,?,?,?,?) "
+              "ON CONFLICT(email) DO UPDATE SET name=excluded.name, phone=excluded.phone, "
+              "last_login=excluded.last_login", (email, row["name"], row["phone"], now, now))
+    db.audit(c, "verified", email, ev["id"], f"{row['name']} | {row['phone']}", ip())
     c.commit()
     r = jsonify(ok=True)
     r.set_cookie(COOKIE, token, max_age=config.SESSION_TTL, httponly=True,
@@ -366,7 +414,12 @@ def _state(s):
                 groups.append(grp)
             grp["photos"].append(r["photo_id"])
             photos.append(r["photo_id"])
+    saved = [r[0] for r in c.execute(
+        "SELECT b.photo_id FROM bookmarks b JOIN photos p ON p.id=b.photo_id "
+        "JOIN events e ON e.id=p.event_id WHERE b.email=? AND e.active=1", (s["email"],))]
+    u = c.execute("SELECT name FROM users WHERE email=?", (s["email"],)).fetchone()
     return dict(ok=True, email=s["email"], status=s["status"], photos=photos, groups=groups,
+                saved=saved, name=u["name"] if u else "",
                 event_code=ev["code"] if ev else ("" if s["event_id"] == 0 else None),
                 date_from=s["date_from"], date_to=s["date_to"],
                 tries_left=max(0, config.SELFIE_MAX_TRIES - s["selfie_tries"]))
@@ -378,6 +431,61 @@ def me():
     if not s:
         return err("Not signed in.", 401)
     return jsonify(_state(s))
+
+
+@app.get("/api/events")
+def my_events():
+    """General link: the events inside the guest's dates, to choose from."""
+    s = guest()
+    if not s or s["event_id"] != 0 or not config.PORTAL:
+        return err("Please verify your email first.", 401)
+    frm, to = request.args.get("from", ""), request.args.get("to", "")
+    if not (DATE_RE.fullmatch(frm) and DATE_RE.fullmatch(to)) or frm > to:
+        return err("Please choose the dates (from - to).")
+    rows = con().execute(
+        "SELECT id, name, event_date FROM events WHERE active=1 AND event_date<>'' "
+        "AND event_date BETWEEN ? AND ? ORDER BY event_date DESC, id DESC", (frm, to)).fetchall()
+    return jsonify(ok=True, events=[dict(id=r["id"], name=r["name"], date=r["event_date"])
+                                    for r in rows])
+
+
+@app.post("/api/bookmark/<int:pid>")
+def bookmark(pid):
+    """Save / un-save one of the guest's own photos for later visits."""
+    s = guest()
+    if not s:
+        return err("Session expired. Please sign in again.", 401)
+    c = con()
+    on = (request.get_json(silent=True) or {}).get("on") is True
+    if on:
+        if not allowed(s, pid):
+            abort(404)
+        c.execute("INSERT OR IGNORE INTO bookmarks(email,photo_id,created_at) VALUES(?,?,?)",
+                  (s["email"], pid, time.time()))
+    else:
+        c.execute("DELETE FROM bookmarks WHERE email=? AND photo_id=?", (s["email"], pid))
+    c.commit()
+    return jsonify(ok=True, on=on)
+
+
+@app.get("/api/bookmarks")
+def bookmarks():
+    """The guest's saved photos, grouped by event - no new selfie needed."""
+    s = guest()
+    if not s:
+        return err("Not signed in.", 401)
+    groups, by_event = [], {}
+    for r in con().execute(
+            "SELECT b.photo_id, e.id AS eid, e.name, e.event_date FROM bookmarks b "
+            "JOIN photos p ON p.id=b.photo_id JOIN events e ON e.id=p.event_id "
+            "WHERE b.email=? AND e.active=1 ORDER BY e.event_date DESC, e.id DESC, b.created_at",
+            (s["email"],)):
+        grp = by_event.get(r["eid"])
+        if grp is None:
+            grp = by_event[r["eid"]] = dict(name=r["name"], date=r["event_date"], photos=[])
+            groups.append(grp)
+        grp["photos"].append(r["photo_id"])
+    return jsonify(ok=True, groups=groups)
 
 
 @app.post("/api/selfie")
@@ -395,6 +503,11 @@ def selfie():
         albums = c.execute(
             "SELECT * FROM events WHERE active=1 AND event_date<>'' AND event_date BETWEEN ? AND ? "
             "ORDER BY event_date DESC", (date_from, date_to)).fetchall() if config.PORTAL else []
+        chosen = d.get("events")
+        if isinstance(chosen, list):        # the guest ticked some of the events
+            albums = [a for a in albums if a["id"] in chosen]
+            if not albums:
+                return err("Please choose at least one event.")
         if not albums:
             return err("There is no album for these dates. Please check the dates, "
                        "or ask the photographer.", 404)
@@ -472,7 +585,9 @@ def download_link(what):
     s = guest()
     if not s:
         return err("Session expired. Please verify again.", 401)
-    if what != "all":
+    if what == "saved":
+        pass
+    elif what != "all":
         if not what.isdigit() or not allowed(s, int(what)):
             abort(404)
     elif s["status"] not in ("matched", "approved"):
@@ -492,12 +607,18 @@ def download(token):
     if not s or s["id"] != data.get("s"):
         abort(403)
     c = con()
-    if data["p"] == "all":
-        if s["status"] not in ("matched", "approved"):
-            abort(403)
-        rows = c.execute(
-            "SELECT p.relpath, p.root, p.ref, e.folders FROM matches m JOIN photos p ON p.id=m.photo_id "
-            "JOIN events e ON e.id=p.event_id WHERE m.session_id=?", (s["id"],)).fetchall()
+    if data["p"] in ("all", "saved"):
+        if data["p"] == "saved":
+            rows = c.execute(
+                "SELECT p.*, e.folders FROM bookmarks b JOIN photos p ON p.id=b.photo_id "
+                "JOIN events e ON e.id=p.event_id WHERE b.email=? AND e.active=1",
+                (s["email"],)).fetchall()
+        else:
+            if s["status"] not in ("matched", "approved"):
+                abort(403)
+            rows = c.execute(
+                "SELECT p.*, e.folders FROM matches m JOIN photos p ON p.id=m.photo_id "
+                "JOIN events e ON e.id=p.event_id WHERE m.session_id=?", (s["id"],)).fetchall()
         if not rows:
             abort(404)
         tmp = tempfile.SpooledTemporaryFile(max_size=64 * 1024 * 1024)
@@ -510,6 +631,7 @@ def download(token):
                 if gdrive.is_drive(r["root"]) and old_copy(r):
                     n += 1
                     z.write(old_copy(r), f"{n:04d}_{name}")
+                    record_download(c, s, r)
                     continue
                 if gdrive.is_drive(r["root"]):       # straight from Drive into the zip
                     try:
@@ -523,12 +645,14 @@ def download(token):
                             if not chunk:
                                 break
                             dst.write(chunk)
+                    record_download(c, s, r)
                     continue
                 base = Path(r["root"])
                 p = base / r["relpath"]
                 if p.is_file() and base.resolve() in p.resolve().parents:
                     n += 1          # photos on an offline drive are left out
                     z.write(p, f"{n:04d}_{name}")
+                    record_download(c, s, r)
             if not n:
                 abort(404)
         tmp.seek(0)
@@ -542,6 +666,7 @@ def download(token):
     if row["root"] not in db.split_folders(row["folders"]):
         abort(404)
     db.audit(c, "download", s["email"], s["event_id"], row["relpath"], ip())
+    record_download(c, s, row)
     c.commit()
     if gdrive.is_drive(row["root"]) and row["ref"]:
         return drive_download(row["ref"], Path(row["relpath"]).name)
@@ -633,8 +758,22 @@ def admin():
         "FROM sessions s LEFT JOIN events e ON e.id=s.event_id "
         "WHERE s.status='pending' AND s.expires_at>? ORDER BY s.id", (time.time(),)).fetchall()
     log = c.execute("SELECT * FROM audit ORDER BY id DESC LIMIT 150").fetchall()
+    people = []
+    for u in c.execute(
+            "SELECT u.email, u.name, u.phone, u.last_login, "
+            "(SELECT COUNT(DISTINCT photo_id) FROM downloads d WHERE d.email=u.email) AS n, "
+            "(SELECT MAX(ts) FROM downloads d WHERE d.email=u.email) AS last_dl, "
+            "(SELECT COUNT(*) FROM bookmarks b WHERE b.email=u.email) AS saved "
+            "FROM users u ORDER BY COALESCE(last_dl, 0) DESC, u.last_login DESC LIMIT 300").fetchall():
+        u = dict(u)
+        u["files"] = c.execute(
+            "SELECT d.relpath, MAX(d.ts) AS ts, COALESCE(e.name, '') AS album FROM downloads d "
+            "LEFT JOIN events e ON e.id=d.event_id WHERE d.email=? "
+            "GROUP BY d.photo_id, d.relpath ORDER BY ts DESC LIMIT 200", (u["email"],)).fetchall()
+        people.append(u)
     return render_template("admin.html", brand=config.BRAND, events=events, pending=pending,
-                           log=log, csrf=session["csrf"],
+                           log=log, csrf=session["csrf"], people=people,
+                           threshold=f"{config.MATCH_THRESHOLD:.2f}",
                            portal_link=guest_link("") if config.PORTAL else "",
                            today=time.strftime("%Y-%m-%d"), drive_email=gdrive.robot_email(), msg=request.args.get("msg", ""),
                            fmt=lambda t: time.strftime("%d %b %H:%M", time.localtime(t)))
@@ -693,6 +832,46 @@ def admin_status():
         text, state = status_text(e["id"], n, f)
         out[e["id"]] = dict(text=text, state=state)
     return jsonify(out)
+
+
+@app.get("/admin/downloads.csv")
+def admin_downloads_csv():
+    """The whole download record as a file that opens in Excel."""
+    if not is_admin():
+        abort(403)
+    import csv
+    out = io.StringIO()
+    w = csv.writer(out)
+    w.writerow(["Time", "Name", "Phone", "Email", "Album", "Photo", "IP"])
+    for r in con().execute(
+            "SELECT d.ts, u.name, u.phone, d.email, COALESCE(e.name, '') AS album, d.relpath, d.ip "
+            "FROM downloads d LEFT JOIN users u ON u.email=d.email "
+            "LEFT JOIN events e ON e.id=d.event_id ORDER BY d.id DESC"):
+        row = [time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(r["ts"])), r["name"] or "",
+               r["phone"] or "", r["email"], r["album"], r["relpath"], r["ip"]]
+        # a cell that starts with = + - @ would be run as a formula by Excel
+        w.writerow([("'" + v) if isinstance(v, str) and v[:1] in "=+-@" else v for v in row])
+    return app.response_class(
+        "\ufeff" + out.getvalue(), mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=facefind-downloads.csv"})
+
+
+@app.post("/admin/settings")
+def admin_settings():
+    if not admin_post_ok():
+        abort(403)
+    try:
+        v = float(request.form.get("threshold", ""))
+        assert 0.30 <= v <= 0.80
+    except (ValueError, AssertionError):
+        return redirect(url_for("admin", msg="Not saved. Strictness must be between 0.30 and 0.80."))
+    c = con()
+    db.kv_set(c, "match_threshold", f"{v:.3f}")
+    db.audit(c, "strictness_changed", detail=f"{v:.2f}", ip=ip())
+    c.commit()
+    config.MATCH_THRESHOLD = v
+    return redirect(url_for("admin", msg=f"Match strictness is now {v:.2f}. It applies to the "
+                                         "next selfie - no new scan is needed."))
 
 
 @app.get("/admin/browse")
