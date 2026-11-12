@@ -105,8 +105,14 @@ tr = adm.post(f"/admin/events/{ev['id']}/test", data={"csrf": csrf, "photo": (io
 assert "Album has 5 photos and 5 faces" in tr and "best score 1.00, 2 photos match" in tr, tr[:600]
 tb = adm.post(f"/admin/events/{ev['id']}/test", data={"csrf": csrf, "photo": (io.BytesIO(base64.b64decode(img(BLACK).split(",")[1])), "t.png")}, follow_redirects=True).data.decode()
 assert "No face was found" in tb
-ts = adm.post(f"/admin/events/{ev['id']}/test-selfie", json={"image": img(BLUE)}, headers={"X-CSRF": csrf}).json["text"]
+tj = adm.post(f"/admin/events/{ev['id']}/test-selfie", json={"image": img(BLUE)}, headers={"X-CSRF": csrf}).json
+ts = tj["text"]
 assert "best score 1.00, 3 photos match" in ts, ts
+# the admin test shows the same photos a guest with that face would get
+assert len(tj["photos"]) == 3 and {x["id"] for x in tj["photos"]} == others, tj
+ap = adm.get(f"/admin/photo/{tj['photos'][0]['id']}"); assert ap.status_code == 200 and ap.mimetype == "image/jpeg"
+assert A.app.test_client().get(f"/admin/photo/{tj['photos'][0]['id']}").status_code == 403
+assert g.get(f"/admin/photo/{tj['photos'][0]['id']}").status_code == 403      # a guest is not an admin
 assert adm.post(f"/admin/events/{ev['id']}/test-selfie", json={"image": img(BLUE)}).status_code == 403
 # a folder with only RAW / HEIC files explains itself
 rawd = tmp / "raw"; rawd.mkdir(); (rawd / "a.CR2").write_bytes(b"x"); (rawd / "b.heic").write_bytes(b"x")
@@ -158,12 +164,11 @@ os.rename(tmp / "driveE_off", tmp / "driveE")
 adm.post(f"/admin/events/{ev['id']}/folders", data={"csrf": csrf, "folders": str(d1)})
 e_pid = con.execute("SELECT id FROM photos WHERE root=? AND relpath='red2.png'", (str(d2.resolve()),)).fetchone()[0]
 assert g.get(f"/api/preview/{e_pid}").status_code == 404
-indexer.index_event(ev["id"]); assert con.execute("SELECT COUNT(*) FROM photos").fetchone()[0] == 2
+indexer.index_event(ev["id"]); assert con.execute("SELECT COUNT(*) FROM photos").fetchone()[0] == 2, indexer.progress[ev["id"]]
 print("ok  offline drive keeps index; removed folder is revoked")
 
 # path escape, closed event, sign out
 con.execute("UPDATE photos SET relpath='../../data/secret.key' WHERE id=?", (pid,)); con.commit()
-(config.CACHE_DIR / f"{pid}.jpg").unlink(missing_ok=True)
 assert g.get(f"/api/preview/{pid}").status_code == 404
 assert g.post("/api/forget", json={}, headers=H).status_code == 200 and g.get("/api/me").status_code == 401
 adm.post(f"/admin/events/{ev['id']}/toggle", data={"csrf": csrf})
@@ -196,18 +201,26 @@ keyfile = _json.dumps({"type": "service_account", "client_email": "robot@proj.ia
 assert b"not the right file" in adm.post("/admin/google-key", data={"csrf": csrf, "key": (io.BytesIO(b"{}"), "k.json")}, follow_redirects=True).data
 assert b"Google Drive connected" in adm.post("/admin/google-key", data={"csrf": csrf, "key": (io.BytesIO(keyfile), "k.json")}, follow_redirects=True).data
 a_jwt, _ = gdrive.make_assertion(_json.loads(keyfile)); assert a_jwt.count(".") == 2
-tree = {FID: [{"id": "fileRED0001", "name": "a:red?.png", "mimeType": "image/png", "size": "1", "modifiedTime": "t1"},
+def png(color):
+    return base64.b64decode(img(color).split(",")[1])
+dims = {"width": 640, "height": 480}
+tree = {FID: [{"id": "fileRED0001", "name": "a:red?.png", "mimeType": "image/png", "size": "1", "modifiedTime": "t1", "imageMediaMetadata": dims},
               {"id": "subFOLDER01", "name": "day2", "mimeType": gdrive.FOLDER},
               {"id": "docXXXXXXX1", "name": "notes.txt", "mimeType": "text/plain"}],
-        "subFOLDER01": [{"id": "fileBLUE001", "name": "blue.png", "mimeType": "image/png", "size": "1", "modifiedTime": "t1"}]}
+        "subFOLDER01": [{"id": "fileBLUE001", "name": "blue.png", "mimeType": "image/png", "size": "1", "modifiedTime": "t1", "imageMediaMetadata": dims}]}
 colors = {"fileRED0001": RED, "fileBLUE001": BLUE}
 gdrive.folder_name = lambda fid: "Sharma wedding" if fid == FID else (_ for _ in ()).throw(gdrive.DriveError("Google cannot see this folder. Share it with robot@proj"))
-gdrive.list_children = lambda fid: tree[fid]
-calls = []
-def fake_dl(file_id, dest): calls.append(file_id); img(colors[file_id], dest)
-gdrive.download_file = fake_dl
+gdrive.list_children = lambda fid: iter(tree[fid])
+calls, fulls = [], []
+def fake_small(info, side): calls.append(info["id"]); return png(colors[info["id"]])
+def fake_full(file_id): fulls.append(file_id); return png(colors[file_id])
+class Stream(io.BytesIO):
+    headers = {"Content-Type": "image/png"}
+gdrive.fetch_small, gdrive.fetch_full = fake_small, fake_full
+gdrive.open_original = lambda file_id: Stream(png(colors[file_id]))
 bad = adm.post("/admin/events", data={"name": "X", "csrf": csrf, "folders": "https://drive.google.com/drive/folders/ZZZZZZZZZZZZZZ"}, follow_redirects=True)
 assert b"Share it with robot@proj" in bad.data
+old_copy = config.DRIVE_DIR / FID; old_copy.mkdir(parents=True); (old_copy / "left-over.jpg").write_bytes(b"x")   # from an older version
 adm.post("/admin/events", data={"name": "Drive", "csrf": csrf, "folders": f"https://drive.google.com/drive/folders/{FID}?usp=sharing"})
 dev = con.execute("SELECT * FROM events WHERE name='Drive'").fetchone()
 assert dev["folders"] == "gdrive:" + FID
@@ -217,19 +230,33 @@ def wait(eid):
         time.sleep(0.1)
 wait(dev["id"]); assert indexer.progress[dev["id"]]["state"] == "finished", indexer.progress[dev["id"]]
 assert con.execute("SELECT COUNT(*) FROM photos WHERE event_id=?", (dev["id"],)).fetchone()[0] == 2
-assert sorted(calls) == ["fileBLUE001", "fileRED0001"]
-indexer.index_event(dev["id"]); assert len(calls) == 2            # second scan downloads nothing
+assert sorted(calls) == ["fileBLUE001", "fileRED0001"] and not fulls
+# scanned in place: no Drive photo was written to this computer, and the old copy is gone
+assert not old_copy.exists() and not [f for f in config.DRIVE_DIR.rglob("*") if f.is_file()]
+indexer.index_event(dev["id"]); assert len(calls) == 2            # second scan reads nothing again
 assert "Google Drive: Sharma wedding" in adm.get("/admin").data.decode()
 con.execute("DELETE FROM otps"); con.commit()
 sent.clear(); dg = A.app.test_client(); code_keep, code = code, dev["code"]; login(dg, "d@x.com")
 rr = dg.post("/api/selfie", json={"image": img(RED)}, headers=H).json
 assert rr["status"] == "matched" and len(rr["photos"]) == 1, rr
+pv = dg.get(f"/api/preview/{rr['photos'][0]}"); assert pv.status_code == 200 and pv.mimetype == "image/jpeg"
 got = dg.get(dg.post(f"/api/download-link/{rr['photos'][0]}", json={}, headers=H).json["url"])
-assert got.status_code == 200 and "a_red_.png" in got.headers["Content-Disposition"]
+assert got.status_code == 200 and "a_red_.png" in got.headers["Content-Disposition"] and got.data == png(RED)
+zd = dg.get(dg.post("/api/download-link/all", json={}, headers=H).json["url"])
+zf = zipfile.ZipFile(io.BytesIO(zd.data)); assert len(zf.namelist()) == 1 and zf.read(zf.namelist()[0]) == png(RED)
+blue_pid = con.execute("SELECT id FROM photos WHERE ref='fileBLUE001'").fetchone()[0]
+assert dg.get(f"/api/preview/{blue_pid}").status_code == 404       # someone else's Drive photo
+# Google's small version is too small for a big original -> the original is read instead (in memory)
+big = indexer._drive_image({"id": "fileRED0001", "imageMediaMetadata": {"width": 6000, "height": 4000}})
+assert big is not None and fulls == ["fileRED0001"]
 tree[FID].pop(0); indexer.index_event(dev["id"])                 # photo deleted on Drive
 assert con.execute("SELECT COUNT(*) FROM photos WHERE event_id=?", (dev["id"],)).fetchone()[0] == 1
+# a scan that was cut off is remembered and finished later
+A.db.kv_set(con, f"scanning:{dev['id']}", "1"); con.commit()
+assert indexer.unfinished(con) == [dev["id"]]
+indexer.index_event(dev["id"]); assert indexer.unfinished(con) == []
 code = code_keep
-print("ok  Google Drive link: key upload, share check, sync, match, download, deletion")
+print("ok  Google Drive link: scanned in place (nothing saved), preview, download, zip, deletion, resume")
 
 # selfie limit: the guest is sent back to the email step, not left stuck
 con.execute("DELETE FROM otps"); con.commit(); sent.clear()

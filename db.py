@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS faces(
   id INTEGER PRIMARY KEY, photo_id INTEGER NOT NULL, event_id INTEGER NOT NULL,
   embedding BLOB NOT NULL);
 CREATE INDEX IF NOT EXISTS faces_event ON faces(event_id);
+CREATE INDEX IF NOT EXISTS faces_photo ON faces(photo_id);
 CREATE TABLE IF NOT EXISTS otps(
   id INTEGER PRIMARY KEY, email TEXT, event_id INTEGER, code_hash TEXT,
   expires_at REAL, attempts INTEGER DEFAULT 0, used INTEGER DEFAULT 0,
@@ -27,6 +28,8 @@ CREATE TABLE IF NOT EXISTS sessions(
 CREATE TABLE IF NOT EXISTS matches(
   session_id INTEGER, photo_id INTEGER, score REAL,
   PRIMARY KEY(session_id, photo_id));
+CREATE INDEX IF NOT EXISTS matches_photo ON matches(photo_id);
+CREATE TABLE IF NOT EXISTS kv(k TEXT PRIMARY KEY, v TEXT);
 CREATE TABLE IF NOT EXISTS audit(
   id INTEGER PRIMARY KEY, ts REAL, email TEXT, event_id INTEGER,
   action TEXT, detail TEXT, ip TEXT);
@@ -44,6 +47,13 @@ def connect():
 def init():
     con = connect()
     con.executescript(SCHEMA)
+    # Added later: where a Google Drive photo lives (its file id) and the
+    # "version stamp" Drive gives it, so unchanged photos are not scanned twice.
+    cols = {r[1] for r in con.execute("PRAGMA table_info(photos)")}
+    if "ref" not in cols:
+        con.execute("ALTER TABLE photos ADD COLUMN ref TEXT DEFAULT ''")
+    if "stamp" not in cols:
+        con.execute("ALTER TABLE photos ADD COLUMN stamp TEXT DEFAULT ''")
     con.commit()
     con.close()
 
@@ -52,6 +62,19 @@ def audit(con, action, email=None, event_id=None, detail="", ip=""):
     con.execute(
         "INSERT INTO audit(ts,email,event_id,action,detail,ip) VALUES(?,?,?,?,?,?)",
         (time.time(), email, event_id, action, detail, ip))
+
+
+def kv_get(con, key, default=""):
+    row = con.execute("SELECT v FROM kv WHERE k=?", (key,)).fetchone()
+    return row[0] if row else default
+
+
+def kv_set(con, key, value):
+    if value is None:
+        con.execute("DELETE FROM kv WHERE k=?", (key,))
+    else:
+        con.execute("INSERT INTO kv(k,v) VALUES(?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v",
+                    (key, value))
 
 
 def split_folders(text):

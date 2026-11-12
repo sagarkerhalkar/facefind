@@ -33,7 +33,7 @@ SELFIE_DIR = DATA_DIR / "pending_selfies"
 SELFIE_DIR.mkdir(exist_ok=True)
 DB_PATH = DATA_DIR / "facefind.db"
 GOOGLE_KEY = DATA_DIR / "google-key.json"           # uploaded on the admin page
-DRIVE_DIR = Path(os.environ.get("DRIVE_CACHE", DATA_DIR / "drive"))  # local copy of Drive photos
+DRIVE_DIR = Path(os.environ.get("DRIVE_CACHE", DATA_DIR / "drive"))  # old versions copied Drive photos here
 MODELS_DIR = Path(os.environ.get("MODELS_DIR", BASE / "models"))
 
 
@@ -96,6 +96,10 @@ MAX_RESULTS = 500
 PREVIEW_SIDE = 900
 # Photos scanned at the same time. More = faster, but the PC gets busier.
 SCAN_WORKERS = int(os.environ.get("SCAN_WORKERS", "0")) or max(1, min(6, (os.cpu_count() or 2) - 1))
+# Google Drive photos are read straight from Drive into memory (never saved).
+DRIVE_WORKERS = int(os.environ.get("DRIVE_WORKERS", "8"))   # Drive photos read at the same time
+DRIVE_SCAN_SIDE = 1600      # size asked from Drive for scanning (same size the scan uses)
+MAX_PHOTO_BYTES = 120 * 1024 * 1024
 OTHER_EXT = {".heic", ".heif", ".cr2", ".cr3", ".nef", ".arw", ".dng", ".raf", ".rw2",
              ".orf", ".tif", ".tiff", ".gif", ".psd"}   # seen but not readable
 IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}

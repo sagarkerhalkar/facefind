@@ -4,10 +4,12 @@ To use a different model (e.g. InsightFace on a GPU), write a class with the
 same `embed(bgr_image) -> list of unit vectors` method and return it from
 get_engine(). Re-index after changing the model.
 """
+import io
 import threading
 
 import cv2
 import numpy as np
+from PIL import Image
 
 import config
 
@@ -73,12 +75,24 @@ def make_engine():
     return OpenCVEngine()
 
 
-def decode_fast(data: bytes):
-    """For scanning: big camera photos are opened at half size, which is
-    several times faster and still larger than the scan needs."""
+def decode_fast(data: bytes, want=1600):
+    """For scanning: a big camera photo is opened directly at 1/2, 1/4 or 1/8
+    size (whichever still leaves `want` pixels), which is several times
+    faster than opening it in full and shrinking it afterwards."""
     arr = np.frombuffer(data, np.uint8)
-    img = cv2.imdecode(arr, cv2.IMREAD_REDUCED_COLOR_2)
-    if img is None or max(img.shape[:2]) < 1600:
+    flag = cv2.IMREAD_COLOR
+    try:
+        big = max(Image.open(io.BytesIO(data)).size)      # reads the header only
+        if big >= want * 8:
+            flag = cv2.IMREAD_REDUCED_COLOR_8
+        elif big >= want * 4:
+            flag = cv2.IMREAD_REDUCED_COLOR_4
+        elif big >= want * 2:
+            flag = cv2.IMREAD_REDUCED_COLOR_2
+    except Exception:
+        pass
+    img = cv2.imdecode(arr, flag)
+    if img is None and flag != cv2.IMREAD_COLOR:
         img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     return img
 

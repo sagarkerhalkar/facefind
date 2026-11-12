@@ -1,10 +1,14 @@
-"""Google Drive links.
+"""Google Drive links - photos are read IN PLACE, never copied to this PC.
 
 The app reads Drive through a "robot" Google account (a service account).
 Any folder that is shared with the robot's email - or set to "Anyone with
-the link" - can be pasted as a link. Photos are copied once into the app's
-own folder (data/drive/...) and then scanned like any other folder; later
-scans only fetch new or changed photos.
+the link" - can be pasted as a link.
+
+Scanning: each photo is streamed from Drive into memory, its face
+signatures are stored, and the picture is thrown away. Drive is asked for
+a ready-made 1600-pixel version (the size the scan uses anyway), so about
+0.3 MB travels per photo instead of the 5-25 MB original.
+Previews and downloads are streamed from Drive at the moment a guest asks.
 """
 import base64
 import json
@@ -17,6 +21,7 @@ import urllib.request
 from pathlib import Path
 
 import config
+import db
 
 API = "https://www.googleapis.com/drive/v3/"
 SCOPE = "https://www.googleapis.com/auth/drive.readonly"
@@ -59,21 +64,31 @@ def parse_link(text):
     return m.group(1) if m else None
 
 
-def local_root(entry):
-    """Where an album source lives on disk: the folder itself, or the local
-    copy of a Drive folder."""
-    fid = parse_link(entry) if entry.startswith("gdrive:") else None
-    return str(config.DRIVE_DIR / fid) if fid else entry
+def is_drive(entry):
+    return entry.startswith("gdrive:")
+
+
+def remember_name(fid, name):
+    con = db.connect()
+    try:
+        db.kv_set(con, "drive_name:" + fid, name)
+        con.commit()
+    finally:
+        con.close()
+
+
+def known_name(fid):
+    con = db.connect()
+    try:
+        return db.kv_get(con, "drive_name:" + fid)
+    finally:
+        con.close()
 
 
 def label(entry):
-    if not entry.startswith("gdrive:"):
+    if not is_drive(entry):
         return entry
-    try:
-        name = (Path(local_root(entry)) / ".name").read_text(encoding="utf-8")
-    except OSError:
-        name = entry[7:]
-    return f"Google Drive: {name}"
+    return f"Google Drive: {known_name(entry[7:]) or entry[7:]}"
 
 
 # ------------------------------------------------------------------ access
@@ -121,11 +136,7 @@ def token():
         return _token["value"]
 
 
-def _explain(e):
-    try:
-        text = e.read().decode("utf-8", "replace")
-    except Exception:
-        text = ""
+def _explain(e, text=""):
     if e.code == 404:
         return (f"Google cannot see this folder. Share it with {robot_email()} "
                 "(Viewer is enough) and try again.")
@@ -139,19 +150,25 @@ def _explain(e):
     return f"Google Drive error {e.code}."
 
 
-def _open(url):
-    """GET with the robot's access; retries when Google is busy."""
-    for attempt in range(5):
+def _open(url, tries=5):
+    """GET with the robot's access; waits and retries when Google is busy."""
+    for attempt in range(tries):
         req = urllib.request.Request(url, headers={"Authorization": "Bearer " + token()})
         try:
             return urllib.request.urlopen(req, timeout=120)
         except urllib.error.HTTPError as e:
-            if e.code in (429, 500, 502, 503, 504) and attempt < 4:
+            try:
+                text = e.read().decode("utf-8", "replace")
+            except Exception:
+                text = ""
+            busy = e.code in (429, 500, 502, 503, 504) or (
+                e.code == 403 and "ateLimitExceeded" in text)
+            if busy and attempt < tries - 1:
                 time.sleep(2 ** attempt)
                 continue
-            raise DriveError(_explain(e))
+            raise DriveError(_explain(e, text))
         except (urllib.error.URLError, OSError) as e:
-            if attempt < 4:
+            if attempt < tries - 1:
                 time.sleep(2 ** attempt)
                 continue
             raise DriveError(f"Could not reach Google Drive ({e}).")
@@ -169,52 +186,50 @@ def folder_name(fid):
     return d.get("name", fid)
 
 
+FILE_FIELDS = ("id,name,mimeType,size,modifiedTime,md5Checksum,thumbnailLink,"
+               "imageMediaMetadata(width,height),shortcutDetails")
+
+
 def list_children(fid):
-    out, page = [], None
+    """One folder's content, 1000 entries per request, as a stream."""
+    page = None
     while True:
         params = {
             "q": f"'{fid}' in parents and trashed=false",
-            "fields": "nextPageToken,files(id,name,mimeType,size,modifiedTime,shortcutDetails)",
+            "fields": f"nextPageToken,files({FILE_FIELDS})",
             "pageSize": "1000", "supportsAllDrives": "true",
             "includeItemsFromAllDrives": "true"}
         if page:
             params["pageToken"] = page
         d = _get_json("files", params)
-        out += d.get("files", [])
+        yield from d.get("files", [])
         page = d.get("nextPageToken")
         if not page:
-            return out
+            return
 
 
-def download_file(file_id, dest):
-    part = dest.with_name(dest.name + ".part")
-    try:
-        with _open(API + "files/" + file_id + "?alt=media&supportsAllDrives=true") as r, \
-                open(part, "wb") as f:
-            while True:
-                chunk = r.read(1024 * 1024)
-                if not chunk:
-                    break
-                f.write(chunk)
-        part.replace(dest)
-    except OSError as e:
-        part.unlink(missing_ok=True)
-        raise DriveError(f"Download stopped ({e}).")
+def file_meta(file_id):
+    return _get_json("files/" + file_id, {"fields": FILE_FIELDS, "supportsAllDrives": "true"})
 
 
-# -------------------------------------------------------------------- sync
 def _safe(name):
     name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name).strip(" .")
     return name or "unnamed"
 
 
+def stamp(f):
+    """Changes whenever the photo on Drive changes."""
+    return f"{f.get('size')}|{f.get('modifiedTime')}|{f.get('md5Checksum', '')}"
+
+
 def walk(fid, prefix="", seen=None):
-    """Every photo below a Drive folder -> (relative path, file info)."""
+    """Every photo below a Drive folder -> (relative path, file info).
+    Only the list is read here - no photo is fetched."""
     seen = seen if seen is not None else set()
     if fid in seen:
         return
     seen.add(fid)
-    used = set()
+    used, folders = set(), []
     for f in list_children(fid):
         name, file_id, mime = _safe(f.get("name", "")), f["id"], f.get("mimeType", "")
         sc = f.get("shortcutDetails") or {}
@@ -225,44 +240,64 @@ def walk(fid, prefix="", seen=None):
             name = f"{p.stem}_{file_id[:6]}{p.suffix}"
         used.add(name.lower())
         if mime == FOLDER:
-            yield from walk(file_id, prefix + name + "/", seen)
+            folders.append((file_id, prefix + name + "/"))
         elif Path(name).suffix.lower() in config.IMAGE_EXT:
             yield prefix + name, dict(f, id=file_id)
+    for file_id, sub in folders:
+        yield from walk(file_id, sub, seen)
 
 
-def sync(fid, on_progress=None):
-    """Copies new / changed photos of a Drive folder to the local copy and
-    removes photos that were deleted on Drive. Returns (photos, failed, note)."""
-    dest = config.DRIVE_DIR / fid
-    dest.mkdir(parents=True, exist_ok=True)
-    (dest / ".name").write_text(folder_name(fid), encoding="utf-8")
-    manifest_f = dest / ".manifest.json"
+# ------------------------------------------------- reading photos in place
+_SIZE_RE = re.compile(r"=s\d+[^/=]*$")
+
+
+def _sized(link, side):
+    """Drive's small-picture link, changed to ask for `side` pixels."""
+    if link and _SIZE_RE.search(link):
+        return _SIZE_RE.sub(f"=s{side}", link)
+    return None
+
+
+def _read(url, limit, tries=5):
+    with _open(url, tries) as r:
+        data = r.read(limit + 1)
+    if len(data) > limit:
+        raise DriveError("This file is too large to read.")
+    return data
+
+
+def fetch_small(info, side):
+    """The photo at about `side` pixels, made by Google - into memory only.
+    Returns None when Drive has no such version (the caller then reads the
+    original). `info` is the file's entry from the folder list."""
+    url = _sized(info.get("thumbnailLink"), side)
+    if url:
+        try:
+            return _read(url, 30 * 1024 * 1024, tries=2)
+        except DriveError:
+            pass                                    # these links expire after some hours
     try:
-        old = json.loads(manifest_f.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        old = {}
-    items = list(walk(fid))
-    new, failed, note = {}, 0, ""
-    for i, (rel, f) in enumerate(items, 1):
-        stamp = f"{f.get('size')}|{f.get('modifiedTime')}"
-        target, prev = dest / rel, old.get(f["id"])
-        if not (prev and prev["rel"] == rel and prev["stamp"] == stamp and target.exists()):
-            target.parent.mkdir(parents=True, exist_ok=True)
-            try:
-                download_file(f["id"], target)
-            except DriveError as e:
-                failed, note = failed + 1, str(e)
-                if prev and (dest / prev["rel"]).exists():
-                    new[f["id"]] = prev
-                continue
-            if prev and prev["rel"] != rel:
-                (dest / prev["rel"]).unlink(missing_ok=True)
-        new[f["id"]] = {"rel": rel, "stamp": stamp}
-        if on_progress:
-            on_progress(i, len(items))
-    keep = {v["rel"] for v in new.values()}
-    for prev in old.values():
-        if prev["rel"] not in keep:
-            (dest / prev["rel"]).unlink(missing_ok=True)
-    manifest_f.write_text(json.dumps(new), encoding="utf-8")
-    return len(items), failed, note
+        url = _sized(file_meta(info["id"]).get("thumbnailLink"), side)
+        return _read(url, 30 * 1024 * 1024, tries=2) if url else None
+    except DriveError:
+        return None
+
+
+def fetch_full(file_id):
+    """The original photo into memory (used when no smaller version exists)."""
+    return _read(API + "files/" + file_id + "?alt=media&supportsAllDrives=true",
+                 config.MAX_PHOTO_BYTES)
+
+
+def open_original(file_id):
+    """A stream of the original photo, for sending it on to a guest."""
+    return _open(API + "files/" + file_id + "?alt=media&supportsAllDrives=true")
+
+
+def drop_old_copy(fid):
+    """Earlier versions of this app copied Drive photos to data/drive. That
+    copy is not used any more, so the disk space is given back."""
+    import shutil
+    old = config.DRIVE_DIR / fid
+    if old.is_dir() and config.DRIVE_DIR.resolve() in old.resolve().parents:
+        shutil.rmtree(old, ignore_errors=True)
