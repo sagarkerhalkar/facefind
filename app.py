@@ -6,6 +6,7 @@ import hmac
 import os
 import re
 import secrets
+import string
 import sys
 import tempfile
 import time
@@ -463,7 +464,7 @@ def admin():
         e = dict(e)
         e["photos"] = c.execute("SELECT COUNT(*) FROM photos WHERE event_id=?", (e["id"],)).fetchone()[0]
         e["faces"] = c.execute("SELECT COUNT(*) FROM faces WHERE event_id=?", (e["id"],)).fetchone()[0]
-        e["progress"] = indexer.progress.get(e["id"])
+        e["status"], e["state"] = status_text(e["id"], e["photos"], e["faces"])
         e["folder_list"] = [(f, Path(f).is_dir()) for f in db.split_folders(e["folders"])]
         e["link"] = guest_link(e["code"])
         events.append(e)
@@ -478,6 +479,71 @@ def admin():
                            fmt=lambda t: time.strftime("%d %b %H:%M", time.localtime(t)))
 
 
+def status_text(eid, photos, faces):
+    """Plain-words scan status for the admin page -> (sentence, state)."""
+    p = indexer.progress.get(eid) or {}
+    err_text = p.get("error", "")
+    if "ONNX" in err_text or "Face models" in err_text:
+        err_text = ("The face model files are damaged. Close the black window and "
+                    "run start.bat again - it repairs them by itself.")
+    if p.get("state") == "running":
+        if not p.get("total"):
+            return "Getting ready - counting the photos ...", "running"
+        return f"Scanning ... {p['done']} of {p['total']} photos", "running"
+    if p.get("state") == "failed":
+        return "Scan failed. " + err_text, "failed"
+    if not photos:
+        return "No photos scanned yet. " + err_text, "empty"
+    note = f" Note: {err_text}" if err_text else ""
+    return f"Ready - {photos} photos, {faces} faces found.{note}", "ready"
+
+
+@app.get("/admin/status")
+def admin_status():
+    if not is_admin():
+        abort(403)
+    c, out = con(), {}
+    for e in c.execute("SELECT id FROM events"):
+        n = c.execute("SELECT COUNT(*) FROM photos WHERE event_id=?", (e["id"],)).fetchone()[0]
+        f = c.execute("SELECT COUNT(*) FROM faces WHERE event_id=?", (e["id"],)).fetchone()[0]
+        text, state = status_text(e["id"], n, f)
+        out[e["id"]] = dict(text=text, state=state)
+    return jsonify(out)
+
+
+@app.get("/admin/browse")
+def admin_browse():
+    """Folder picker for the admin page: lists drives, then folders."""
+    if not is_admin():
+        abort(403)
+    path = request.args.get("path", "")
+    if not path:
+        if os.name == "nt":
+            roots = [f"{c}:\\" for c in string.ascii_uppercase if os.path.isdir(f"{c}:\\")]
+        else:
+            roots = ["/"]
+        return jsonify(path="", parent=None, photos=0,
+                       dirs=[dict(name=r, path=r) for r in roots])
+    p = Path(path)
+    if not p.is_dir():
+        return err("Folder not found.", 404)
+    dirs, photos = [], 0
+    try:
+        for i, d in enumerate(sorted(p.iterdir(), key=lambda x: x.name.lower())):
+            if i > 5000:
+                break
+            if d.name.startswith((".", "$")):
+                continue
+            if d.is_dir():
+                dirs.append(dict(name=d.name, path=str(d)))
+            elif d.suffix.lower() in config.IMAGE_EXT:
+                photos += 1
+    except OSError:
+        pass
+    parent = "" if p.parent == p else str(p.parent)
+    return jsonify(path=str(p), parent=parent, photos=photos, dirs=dirs[:1000])
+
+
 @app.post("/admin/events")
 def admin_event_create():
     if not admin_post_ok():
@@ -487,11 +553,13 @@ def admin_event_create():
     if not name or not folders or bad:
         return redirect(url_for("admin", msg="Name missing or folder not found: " + ", ".join(bad)))
     c = con()
-    c.execute("INSERT INTO events(name,code,folders,require_approval,created_at) VALUES(?,?,?,?,?)",
-              (name, secrets.token_urlsafe(9), "\n".join(folders),
-               1 if request.form.get("approval") else 0, time.time()))
+    eid = c.execute(
+        "INSERT INTO events(name,code,folders,require_approval,created_at) VALUES(?,?,?,?,?)",
+        (name, secrets.token_urlsafe(9), "\n".join(folders),
+         1 if request.form.get("approval") else 0, time.time())).lastrowid
     c.commit()
-    return redirect(url_for("admin", msg="Event created. Now press 'Scan photos'."))
+    indexer.start_index(eid)
+    return redirect(url_for("admin", msg="Album created. The photos are being scanned now."))
 
 
 def _clean_folders(text):
@@ -524,7 +592,9 @@ def admin_event_action(eid, action):
             msg = "Not saved - folder not found (is the drive connected?): " + ", ".join(bad)
         else:
             c.execute("UPDATE events SET folders=? WHERE id=?", ("\n".join(folders), eid))
-            msg = "Folders saved. Press 'Scan photos' to read the new drives."
+            c.commit()
+            indexer.start_index(eid)
+            msg = "Folders saved. Scanning the photos now."
     elif action == "toggle":
         c.execute("UPDATE events SET active=1-active WHERE id=?", (eid,))
     elif action == "approval":

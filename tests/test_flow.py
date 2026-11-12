@@ -41,8 +41,17 @@ with adm.session_transaction() as s: csrf = s["csrf"]
 assert adm.post("/admin/events", data={"name": "Wed", "folders": f"{d1}\n{d2}"}).status_code == 403  # no csrf
 adm.post("/admin/events", data={"name": "Wed", "folders": f"{d1}\n{d2}", "csrf": csrf})
 con = A.db.connect(); ev = con.execute("SELECT * FROM events").fetchone(); code = ev["code"]
-indexer.index_event(ev["id"])
+for _ in range(100):                      # creating an album starts the scan by itself
+    if indexer.progress.get(ev["id"], {}).get("state") == "finished": break
+    time.sleep(0.1)
 assert con.execute("SELECT COUNT(*) FROM photos").fetchone()[0] == 5, "photos from both drives"
+st = adm.get("/admin/status").json[str(ev["id"])]
+assert st["state"] == "ready" and "5 photos" in st["text"], st
+br = adm.get("/admin/browse", query_string={"path": str(d1)}).json
+assert br["photos"] == 2 and adm.get("/admin/browse").json["dirs"]
+assert A.app.test_client().get("/admin/browse").status_code == 403
+page = adm.get("/admin").data.decode()
+assert "Copy link" in page and "Ready - 5 photos" in page
 print("ok  admin login, CSRF, event with 2 drives indexed (5 photos)")
 
 def login(client, email):

@@ -1,4 +1,7 @@
-"""Run once:  python download_models.py   (downloads the two face models, ~40 MB)"""
+"""Downloads the two face models (~40 MB) and checks that they really load.
+Runs at every start; a damaged file is downloaded again automatically."""
+import subprocess
+import sys
 import urllib.request
 from pathlib import Path
 
@@ -9,20 +12,55 @@ FILES = {
 }
 out = Path(__file__).resolve().parent / "models"
 out.mkdir(exist_ok=True)
-for name, sub in FILES.items():
-    dest = out / name
-    if dest.exists() and dest.stat().st_size > 100_000:
-        print("already there:", name)
-        continue
-    print("downloading", name, "...")
+CHECK = ("import cv2,sys;"
+         "cv2.FaceDetectorYN.create(sys.argv[1],'',(320,320));"
+         "cv2.FaceRecognizerSF.create(sys.argv[2],'')")
+
+
+def models_load():
+    paths = [str(out / n) for n in FILES]
+    r = subprocess.run([sys.executable, "-c", CHECK, *paths], capture_output=True, text=True)
+    return r.returncode == 0
+
+
+def download(name, sub):
+    dest, part = out / name, out / (name + ".part")
     for attempt in range(1, 6):
         try:
-            urllib.request.urlretrieve(ZOO + sub + name, dest)
-            if dest.stat().st_size > 100_000:
-                break
+            print(f"downloading {name} (attempt {attempt}) ...", flush=True)
+            urllib.request.urlretrieve(ZOO + sub + name, part)
+            if part.stat().st_size > 100_000:
+                part.replace(dest)      # only a complete file gets the real name
+                return
         except Exception as e:
-            print(f"  attempt {attempt} failed: {e}")
-        dest.unlink(missing_ok=True)
-    else:
-        raise SystemExit(f"Download of {name} failed - check the internet and run again.")
-print("Models ready.")
+            print("  failed:", e)
+        part.unlink(missing_ok=True)
+    raise SystemExit(f"Could not download {name}. Check the internet and run again.")
+
+
+def main():
+    missing = [n for n in FILES if not (out / n).exists()]
+    for n in missing:
+        download(n, FILES[n])
+    if models_load():
+        print("Face models ready.")
+        return
+    print("Face model files are damaged - downloading them again ...")
+    for n, sub in FILES.items():
+        (out / n).unlink(missing_ok=True)
+        download(n, sub)
+    if models_load():
+        print("Face models repaired and ready.")
+        return
+    print("Models still do not load with this OpenCV version - installing OpenCV 4 ...")
+    subprocess.run([sys.executable, "-m", "pip", "install", "--no-cache-dir",
+                    "opencv-python>=4.9,<5"])
+    if models_load():
+        print("Face models ready (OpenCV 4).")
+        return
+    raise SystemExit("The face models could not be loaded. Please send this "
+                     "window's text to the developer.")
+
+
+if __name__ == "__main__":
+    main()
