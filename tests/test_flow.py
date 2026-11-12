@@ -149,6 +149,58 @@ adm.post(f"/admin/events/{ev['id']}/toggle", data={"csrf": csrf})
 assert A.app.test_client().get("/e/" + code).status_code == 404
 hd = adm.get("/admin").headers
 assert "frame-ancestors 'none'" in hd["Content-Security-Policy"] and hd["Cache-Control"] == "no-store"
+# Google Drive links (Google is replaced by a stand-in; photos: 1 red, 1 blue in a sub-folder)
+import gdrive, json as _json
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives import serialization as _ser
+FID = "1AbCdEfGhIjKlMnOpQrStUv"
+assert gdrive.parse_link(f"https://drive.google.com/drive/folders/{FID}?usp=sharing") == FID
+assert gdrive.parse_link(f"https://drive.google.com/drive/u/0/folders/{FID}") == FID
+assert gdrive.parse_link("https://example.com/folders/abcdefghijkl") is None
+assert gdrive.parse_link("gdrive:../../etc") is None
+r0 = adm.post("/admin/events", data={"name": "Drive", "csrf": csrf, "folders": f"https://drive.google.com/drive/folders/{FID}"}, follow_redirects=True)
+assert b"not connected yet" in r0.data                       # no key file yet
+pem = rsa.generate_private_key(public_exponent=65537, key_size=2048).private_bytes(
+    _ser.Encoding.PEM, _ser.PrivateFormat.PKCS8, _ser.NoEncryption()).decode()
+keyfile = _json.dumps({"type": "service_account", "client_email": "robot@proj.iam.gserviceaccount.com", "private_key": pem}).encode()
+assert b"not the right file" in adm.post("/admin/google-key", data={"csrf": csrf, "key": (io.BytesIO(b"{}"), "k.json")}, follow_redirects=True).data
+assert b"Google Drive connected" in adm.post("/admin/google-key", data={"csrf": csrf, "key": (io.BytesIO(keyfile), "k.json")}, follow_redirects=True).data
+a_jwt, _ = gdrive.make_assertion(_json.loads(keyfile)); assert a_jwt.count(".") == 2
+tree = {FID: [{"id": "fileRED0001", "name": "a:red?.png", "mimeType": "image/png", "size": "1", "modifiedTime": "t1"},
+              {"id": "subFOLDER01", "name": "day2", "mimeType": gdrive.FOLDER},
+              {"id": "docXXXXXXX1", "name": "notes.txt", "mimeType": "text/plain"}],
+        "subFOLDER01": [{"id": "fileBLUE001", "name": "blue.png", "mimeType": "image/png", "size": "1", "modifiedTime": "t1"}]}
+colors = {"fileRED0001": RED, "fileBLUE001": BLUE}
+gdrive.folder_name = lambda fid: "Sharma wedding" if fid == FID else (_ for _ in ()).throw(gdrive.DriveError("Google cannot see this folder. Share it with robot@proj"))
+gdrive.list_children = lambda fid: tree[fid]
+calls = []
+def fake_dl(file_id, dest): calls.append(file_id); img(colors[file_id], dest)
+gdrive.download_file = fake_dl
+bad = adm.post("/admin/events", data={"name": "X", "csrf": csrf, "folders": "https://drive.google.com/drive/folders/ZZZZZZZZZZZZZZ"}, follow_redirects=True)
+assert b"Share it with robot@proj" in bad.data
+adm.post("/admin/events", data={"name": "Drive", "csrf": csrf, "folders": f"https://drive.google.com/drive/folders/{FID}?usp=sharing"})
+dev = con.execute("SELECT * FROM events WHERE name='Drive'").fetchone()
+assert dev["folders"] == "gdrive:" + FID
+def wait(eid):
+    for _ in range(100):
+        if indexer.progress.get(eid, {}).get("state") in ("finished", "failed"): return
+        time.sleep(0.1)
+wait(dev["id"]); assert indexer.progress[dev["id"]]["state"] == "finished", indexer.progress[dev["id"]]
+assert con.execute("SELECT COUNT(*) FROM photos WHERE event_id=?", (dev["id"],)).fetchone()[0] == 2
+assert sorted(calls) == ["fileBLUE001", "fileRED0001"]
+indexer.index_event(dev["id"]); assert len(calls) == 2            # second scan downloads nothing
+assert "Google Drive: Sharma wedding" in adm.get("/admin").data.decode()
+con.execute("DELETE FROM otps"); con.commit()
+sent.clear(); dg = A.app.test_client(); code_keep, code = code, dev["code"]; login(dg, "d@x.com")
+rr = dg.post("/api/selfie", json={"image": img(RED)}, headers=H).json
+assert rr["status"] == "matched" and len(rr["photos"]) == 1, rr
+got = dg.get(dg.post(f"/api/download-link/{rr['photos'][0]}", json={}, headers=H).json["url"])
+assert got.status_code == 200 and "a_red_.png" in got.headers["Content-Disposition"]
+tree[FID].pop(0); indexer.index_event(dev["id"])                 # photo deleted on Drive
+assert con.execute("SELECT COUNT(*) FROM photos WHERE event_id=?", (dev["id"],)).fetchone()[0] == 1
+code = code_keep
+print("ok  Google Drive link: key upload, share check, sync, match, download, deletion")
+
 # LAN / VLAN rules
 import netutil
 config.ALLOWED_NETWORKS = netutil.parse_networks("192.168.10.0/24, 192.168.20.0/24")

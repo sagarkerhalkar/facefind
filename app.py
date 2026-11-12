@@ -3,6 +3,7 @@ only the photos they appear in. Run:  python app.py"""
 import base64
 import hashlib
 import hmac
+import json
 import os
 import re
 import secrets
@@ -21,6 +22,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 import config
 import db
 import faces
+import gdrive
 import indexer
 import mailer
 import netutil
@@ -150,7 +152,7 @@ def real_path(folders, root, relpath):
     """Only files inside a folder that is still on the event's list."""
     if root not in db.split_folders(folders):
         abort(404)
-    base = Path(root).resolve()
+    base = Path(gdrive.local_root(root)).resolve()
     p = (base / relpath).resolve()
     if base not in p.parents or not p.is_file():
         abort(404)      # also the case when that drive is offline
@@ -372,7 +374,7 @@ def download(token):
         with zipfile.ZipFile(tmp, "w", zipfile.ZIP_STORED) as z:
             n = 0
             for r in rows:
-                base = Path(r["root"])
+                base = Path(gdrive.local_root(r["root"]))
                 p = base / r["relpath"]
                 if r["root"] in db.split_folders(r["folders"]) and p.is_file() \
                         and base.resolve() in p.resolve().parents:
@@ -465,7 +467,9 @@ def admin():
         e["photos"] = c.execute("SELECT COUNT(*) FROM photos WHERE event_id=?", (e["id"],)).fetchone()[0]
         e["faces"] = c.execute("SELECT COUNT(*) FROM faces WHERE event_id=?", (e["id"],)).fetchone()[0]
         e["status"], e["state"] = status_text(e["id"], e["photos"], e["faces"])
-        e["folder_list"] = [(f, Path(f).is_dir()) for f in db.split_folders(e["folders"])]
+        e["folder_list"] = [(gdrive.label(f), Path(gdrive.local_root(f)).is_dir()
+                             or f.startswith("gdrive:"))
+                            for f in db.split_folders(e["folders"])]
         e["link"] = guest_link(e["code"])
         events.append(e)
     pending = c.execute(
@@ -475,7 +479,7 @@ def admin():
         "WHERE s.status='pending' AND s.expires_at>? ORDER BY s.id", (time.time(),)).fetchall()
     log = c.execute("SELECT * FROM audit ORDER BY id DESC LIMIT 150").fetchall()
     return render_template("admin.html", brand=config.BRAND, events=events, pending=pending,
-                           log=log, csrf=session["csrf"], msg=request.args.get("msg", ""),
+                           log=log, csrf=session["csrf"], drive_email=gdrive.robot_email(), msg=request.args.get("msg", ""),
                            fmt=lambda t: time.strftime("%d %b %H:%M", time.localtime(t)))
 
 
@@ -487,6 +491,8 @@ def status_text(eid, photos, faces):
         err_text = ("The face model files are damaged. Close the black window and "
                     "run start.bat again - it repairs them by itself.")
     if p.get("state") == "running":
+        if p.get("phase"):
+            return p["phase"], "running"
         if not p.get("total"):
             return "Getting ready - counting the photos ...", "running"
         return f"Scanning ... {p['done']} of {p['total']} photos", "running"
@@ -551,7 +557,7 @@ def admin_event_create():
     name = request.form.get("name", "").strip()[:120]
     folders, bad = _clean_folders(request.form.get("folders", ""))
     if not name or not folders or bad:
-        return redirect(url_for("admin", msg="Name missing or folder not found: " + ", ".join(bad)))
+        return redirect(url_for("admin", msg="Not created. " + (" | ".join(bad) or "Type a name and add a folder or link.")))
     c = con()
     eid = c.execute(
         "INSERT INTO events(name,code,folders,require_approval,created_at) VALUES(?,?,?,?,?)",
@@ -563,15 +569,57 @@ def admin_event_create():
 
 
 def _clean_folders(text):
+    """Each line is a folder on this computer or a Google Drive folder link."""
     good, bad = [], []
     for f in db.split_folders(text):
-        if Path(f).is_dir():
+        fid = gdrive.parse_link(f)
+        if fid:
+            entry = "gdrive:" + fid
+            if not gdrive.key_info():
+                bad.append("Google Drive is not connected yet - see 'Google Drive links' on this page")
+                continue
+            if not (config.DRIVE_DIR / fid / ".name").exists():
+                try:                      # check right now that the robot can see it
+                    gdrive.folder_name(fid)
+                except gdrive.DriveError as e:
+                    bad.append(str(e))
+                    continue
+            if entry not in good:
+                good.append(entry)
+        elif f.lower().startswith(("http://", "https://")):
+            bad.append(f"{f} (this is not a Google Drive FOLDER link)")
+        elif Path(f).is_dir():
             r = str(Path(f).resolve())
             if r not in good:
                 good.append(r)
         else:
             bad.append(f)
     return good, bad
+
+
+@app.post("/admin/google-key")
+def admin_google_key():
+    """Upload of the Google key file that lets the app read Drive links."""
+    if not admin_post_ok():
+        abort(403)
+    up = request.files.get("key")
+    try:
+        d = json.loads(up.read(200_000).decode("utf-8"))
+        assert d["type"] == "service_account" and d["client_email"] and d["private_key"]
+        gdrive.make_assertion(d)             # the key inside must be usable
+    except Exception:
+        return redirect(url_for("admin", msg="That is not the right file. Upload the .json key "
+                                             "file downloaded from Google Cloud."))
+    config.GOOGLE_KEY.write_text(json.dumps(d), encoding="utf-8")
+    try:
+        config.GOOGLE_KEY.chmod(0o600)
+    except OSError:
+        pass
+    gdrive._token.update(value=None, exp=0)
+    db.audit(con(), "google_key_uploaded", ip=ip())
+    con().commit()
+    return redirect(url_for("admin", msg="Google Drive connected. Share your Drive folders with "
+                                         + d["client_email"] + " and paste their links."))
 
 
 @app.post("/admin/events/<int:eid>/<action>")
@@ -589,7 +637,7 @@ def admin_event_action(eid, action):
         folders += keep          # a drive already on the list may be offline
         bad = [b for b in bad if b not in keep]
         if bad or not folders:
-            msg = "Not saved - folder not found (is the drive connected?): " + ", ".join(bad)
+            msg = "Not saved. " + " | ".join(bad)
         else:
             c.execute("UPDATE events SET folders=? WHERE id=?", ("\n".join(folders), eid))
             c.commit()

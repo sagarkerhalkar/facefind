@@ -25,7 +25,8 @@
 <label for="name">Album name (guests see this)</label>
 <input id="name" name="name" type="text" required placeholder="Sharma wedding">
 <label for="folders">Where are the photos?</label>
-<p class="hint">Press <b>Choose folder</b> and pick the folder. Repeat to add folders from other drives.</p>
+<p class="hint"><b>Option A:</b> paste a Google Drive folder link in the box below (one link per line).<br>
+<b>Option B:</b> press <b>Choose folder</b> and pick a folder on this computer. You can mix both.</p>
 <button type="button" class="ghost nomargin" id="browse-open">Choose folder</button>
 <div id="browser" class="browser" hidden>
   <div class="browser-head"><button type="button" class="small ghost" id="b-up">Back</button> <span id="b-path"></span></div>
@@ -33,10 +34,35 @@
   <div><button type="button" class="small" id="b-pick">Use this folder</button> <span id="b-count" class="hint"></span>
   <button type="button" class="small ghost" id="b-close">Close</button></div>
 </div>
-<textarea id="folders" name="folders" rows="3" required placeholder="The folders you choose appear here (one per line)"></textarea>
+<textarea id="folders" name="folders" rows="3" required placeholder="https://drive.google.com/drive/folders/...   or   D:\Photos\Sharma"></textarea>
 <label class="check"><input type="checkbox" name="approval" checked><span>Ask me before a guest gets photos (safest). Untick to give photos automatically.</span></label>
 <button type="submit">Create album and scan photos</button>
 </form>
+
+<h2>Google Drive links</h2>
+<div class="card wide">
+{% if drive_email %}
+<p class="status ready">Connected. You can paste Drive folder links in Step 1.</p>
+<label for="robot">Before pasting a link, share that Drive folder with this email (Viewer is enough)</label>
+<div class="linkrow"><input id="robot" type="text" readonly value="{{ drive_email }}">
+<button type="button" class="copy nomargin" data-target="robot" data-label="Copy email">Copy email</button></div>
+<p class="hint">In Google Drive: right-click the folder, Share, paste this email, Send. It works for your own folders and for folders where you are an editor. Folders set to "Anyone with the link" work without sharing.</p>
+{% else %}
+<p class="status">Not connected yet. One-time setup, about 5 minutes:</p>
+<ol class="hint">
+<li>Open <b>console.cloud.google.com</b>, sign in, and create a project named facefind.</li>
+<li>Menu, APIs and Services, Library: search <b>Google Drive API</b> and press Enable.</li>
+<li>Menu, IAM and Admin, Service Accounts: Create service account, name it facefind, press Done.</li>
+<li>Click that account, Keys, Add key, Create new key, JSON. A .json file downloads.</li>
+<li>Upload that file here:</li>
+</ol>
+<form method="post" action="{{ url_for('admin_google_key') }}" enctype="multipart/form-data">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<label for="key">Google key file (.json)</label>
+<input id="key" name="key" type="file" accept=".json,application/json" required>
+<button type="submit">Connect Google Drive</button></form>
+{% endif %}
+</div>
 
 <h2>Step 2 - Share the link with guests</h2>
 {% for e in events %}

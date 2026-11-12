@@ -59,6 +59,27 @@ If a drive is switched off, its photos stay in the index and work again when
 it is back. Photos never leave your drives; originals are read only at the
 moment a verified guest downloads them.
 
+## Google Drive links
+
+You can paste a Google Drive **folder link** instead of choosing a folder.
+One-time setup (the admin page shows the same steps):
+
+1. Open console.cloud.google.com and create a project.
+2. APIs and Services → Library → **Google Drive API** → Enable.
+3. IAM and Admin → Service Accounts → Create service account → Done.
+4. Open the account → Keys → Add key → Create new key → JSON.
+5. Upload the downloaded `.json` file under **Google Drive links** on the
+   admin page.
+
+The page then shows a "robot" email. Share each Drive folder with that email
+(Viewer is enough) – this works for your own folders and for folders where you
+are an editor. Folders set to "Anyone with the link" need no sharing.
+
+The app copies the photos once into `data/drive` on this computer, so keep
+enough free disk space. "Scan again" fetches only new or changed photos and
+removes photos deleted on Drive. Keep the key file private; it is never sent
+to GitHub.
+
 ## Using it on your LAN and VLANs
 
 The app listens on every network card of the computer and serves **HTTPS**

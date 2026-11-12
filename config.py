@@ -32,6 +32,8 @@ CACHE_DIR.mkdir(exist_ok=True)
 SELFIE_DIR = DATA_DIR / "pending_selfies"
 SELFIE_DIR.mkdir(exist_ok=True)
 DB_PATH = DATA_DIR / "facefind.db"
+GOOGLE_KEY = DATA_DIR / "google-key.json"           # uploaded on the admin page
+DRIVE_DIR = Path(os.environ.get("DRIVE_CACHE", DATA_DIR / "drive"))  # local copy of Drive photos
 MODELS_DIR = Path(os.environ.get("MODELS_DIR", BASE / "models"))
 
 

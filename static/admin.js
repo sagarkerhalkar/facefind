@@ -7,7 +7,7 @@
     inp.select();
     try { await navigator.clipboard.writeText(inp.value); } catch (e) { document.execCommand("copy"); }
     b.textContent = "Copied";
-    setTimeout(() => { b.textContent = "Copy link"; }, 1500);
+    setTimeout(() => { b.textContent = b.dataset.label || "Copy link"; }, 1500);
   }));
 
   // ---- folder picker
