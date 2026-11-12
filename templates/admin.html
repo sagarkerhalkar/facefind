@@ -25,8 +25,9 @@
 <label for="name">Album name (guests see this)</label>
 <input id="name" name="name" type="text" required placeholder="Sharma wedding">
 <label for="folders">Where are the photos?</label>
-<p class="hint"><b>Option A:</b> paste a Google Drive folder link in the box below (one link per line).<br>
-<b>Option B:</b> press <b>Choose folder</b> and pick a folder on this computer. You can mix both.</p>
+<p class="hint"><b>Option A:</b> paste a Google Drive folder link in the box below (one link per line). The photos are scanned on Drive itself - nothing is copied to this computer.<br>
+<b>Option B:</b> press <b>Choose folder</b> and pick a folder on this computer or on any connected drive. You can mix both.<br>
+For photos that are on Google Drive, use the link (Option A), not the <code>G:</code> drive letter: through <code>G:</code> Windows downloads every photo first, which is slow.</p>
 <button type="button" class="ghost nomargin" id="browse-open">Choose folder</button>
 <div id="browser" class="browser" hidden>
   <div class="browser-head"><button type="button" class="small ghost" id="b-up">Back</button> <span id="b-path"></span></div>
@@ -42,7 +43,7 @@
 <h2>Google Drive links</h2>
 <div class="card wide">
 {% if drive_email %}
-<p class="status ready">Connected. You can paste Drive folder links in Step 1.</p>
+<p class="status ready">Connected. You can paste Drive folder links in Step 1. Photos stay on Drive: they are read for scanning and are not saved on this computer.</p>
 <label for="robot">Before pasting a link, share that Drive folder with this email (Viewer is enough)</label>
 <div class="linkrow"><input id="robot" type="text" readonly value="{{ drive_email }}">
 <button type="button" class="copy nomargin" data-target="robot" data-label="Copy email">Copy email</button></div>
@@ -79,16 +80,14 @@
   <form class="inline" method="post" action="{{ url_for('admin_event_action', eid=e.id, action='toggle') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small ghost">{{ "Close link" if e.active else "Open link" }}</button></form>
   <form class="inline" method="post" action="{{ url_for('admin_event_action', eid=e.id, action='approval') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small ghost">Ask me first: {{ "ON" if e.require_approval else "OFF" }}</button></form>
   <details class="tester" data-eid="{{ e.id }}" data-csrf="{{ csrf }}"><summary>Test with my own selfie or a photo</summary>
-  <p class="hint">Works like the guest page, but without email or code, and it shows the scores.</p>
+  <p class="hint">Works like the guest page, but without email or code. You see the scores and the photos a guest with this face would get.</p>
   <button type="button" class="small t-open">Open camera</button>
   <div class="cam small-cam" hidden><video autoplay playsinline muted></video></div>
   <button type="button" class="small t-snap" hidden>Take selfie and test</button>
-  <p class="status t-result" hidden></p>
-  <form method="post" enctype="multipart/form-data" action="{{ url_for('admin_event_test', eid=e.id) }}"><input type="hidden" name="csrf" value="{{ csrf }}">
   <label for="tp{{ e.id }}">Or choose a clear photo of one person's face</label>
-  <input id="tp{{ e.id }}" name="photo" type="file" accept="image/*" required>
-  <button class="small">Test this photo</button>
-  <p class="hint">The result appears at the top of this page. It does not use an OTP or count as a guest try.</p></form></details>
+  <input id="tp{{ e.id }}" class="t-file" type="file" accept="image/*">
+  <p class="status t-result" role="status" hidden></p>
+  <div class="grid t-grid"></div></details>
   <details><summary>Add or change folders</summary>
   <form method="post" action="{{ url_for('admin_event_action', eid=e.id, action='folders') }}"><input type="hidden" name="csrf" value="{{ csrf }}">
   <label for="fl{{ e.id }}">Folders, one per line</label>

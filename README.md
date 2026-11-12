@@ -39,13 +39,13 @@ you like:
 ```
 D:\Photos\Sharma wedding
 E:\Backup\Sharma wedding
-G:\My Drive\Sharma wedding
 \\NAS\events\Sharma
 ```
 
 - **Hard disks, external disks, NAS:** use the path as it is.
-- **Google Drive:** install *Google Drive for desktop*; it appears as a drive
-  letter (usually `G:`).
+- **Google Drive:** paste the folder **link** (see "Google Drive links"
+  below). Do not use the `G:` drive letter of *Google Drive for desktop*:
+  through `G:` Windows downloads every photo before the app can read it.
 - **OneDrive / Dropbox:** install their desktop app; use the synced folder.
 - **Anything else (S3, many Google accounts, etc.):** `rclone mount` turns it
   into a drive letter.
@@ -75,9 +75,13 @@ The page then shows a "robot" email. Share each Drive folder with that email
 (Viewer is enough) – this works for your own folders and for folders where you
 are an editor. Folders set to "Anyone with the link" need no sharing.
 
-The app copies the photos once into `data/drive` on this computer, so keep
-enough free disk space. "Scan again" fetches only new or changed photos and
-removes photos deleted on Drive. Keep the key file private; it is never sent
+**Drive photos are scanned in place - nothing is copied to this computer.**
+For each photo the app asks Google for a ready-made 1600-pixel version
+(about 0.3 MB instead of the 5-25 MB original), reads it into memory, stores
+the face signatures and throws the picture away. Previews and downloads are
+passed straight from Drive to the guest when they ask. "Scan again" reads
+only new or changed photos and removes photos deleted on Drive. A copy made
+by an older version in `data/drive` is deleted after the next scan. Keep the key file private; it is never sent
 to GitHub.
 
 ## Using it on your LAN and VLANs
@@ -156,4 +160,6 @@ Never expose the app to the internet over plain `http://`.
 ## Check it yourself
 
 `python tests/test_flow.py` runs the security rules end to end (with a
-stand-in face engine, so it needs no models).
+stand-in face engine, so it needs no models). `python tests/test_engine.py`
+checks that the real face models load. GitHub runs both on Windows, Linux
+and macOS after every push (`.github/workflows/ci.yml`).

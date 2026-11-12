@@ -68,3 +68,26 @@ textarea { margin-top:8px; }
 .or { text-align:center; color:var(--soft); font-weight:400; margin-top:18px; }
 input[type=file] { width:100%; padding:10px; border:1px dashed #aab4be; border-radius:8px; background:#fff; }
 .small-cam { max-width:260px; margin:10px 0; }
+.grid figcaption { padding:8px 10px; font-size:13px; color:var(--soft); }
+.t-grid { margin-top:12px; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); }
+img { max-width:100%; }
+header { flex-wrap:wrap; }
+header form.inline { margin-left:auto; }
+/* phones and small tablets */
+@media (max-width:600px) {
+  header { padding:12px 14px; }
+  main { padding:14px 10px 32px; }
+  .card { padding:16px; border-radius:10px; }
+  h1 { font-size:20px; }
+  .grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+  .grid button { margin:8px; padding:10px 6px; font-size:14px; }
+  .bar > div { display:flex; flex-wrap:wrap; gap:6px; width:100%; }
+  .bar button { margin:0; flex:1 1 auto; }
+  .linkrow { flex-direction:column; }
+  button.small { padding:10px 12px; margin:4px 4px 4px 0; }
+  .cam { max-height:55vh; }
+  th, td { padding:6px 8px; }
+}
+/* very wide screens: more photos per row, not bigger ones */
+@media (min-width:1400px) { main { max-width:1320px; } }
+@media (prefers-reduced-motion:no-preference) { button { transition:opacity .15s; } }

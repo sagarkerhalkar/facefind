@@ -50,13 +50,46 @@
     });
   }
 
-  // ---- test an album with a live selfie
+  // ---- test an album with a live selfie or a chosen photo
   document.querySelectorAll(".tester").forEach((box) => {
     const video = box.querySelector("video"), cam = box.querySelector(".cam");
     const open = box.querySelector(".t-open"), snap = box.querySelector(".t-snap");
-    const out = box.querySelector(".t-result");
+    const out = box.querySelector(".t-result"), grid = box.querySelector(".t-grid");
+    const file = box.querySelector(".t-file");
     let stream = null;
     const tell = (t) => { out.textContent = t; out.hidden = false; };
+    function stop() {
+      if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
+      cam.hidden = true; snap.hidden = true; open.hidden = false;
+    }
+    async function test(source, w, h) {
+      const c = document.createElement("canvas");
+      const k = Math.min(1, 1280 / Math.max(w, h));
+      c.width = Math.round(w * k); c.height = Math.round(h * k);
+      c.getContext("2d").drawImage(source, 0, 0, c.width, c.height);
+      snap.disabled = true; tell("Testing ..."); grid.textContent = "";
+      try {
+        const r = await fetch("/admin/events/" + box.dataset.eid + "/test-selfie", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-CSRF": box.dataset.csrf },
+          body: JSON.stringify({ image: c.toDataURL("image/jpeg", 0.92) }) });
+        if (!r.ok) { tell("Please sign in again."); }
+        else {
+          const j = await r.json();
+          tell(j.text);
+          (j.photos || []).forEach((ph) => {
+            const fig = document.createElement("figure");
+            const img = document.createElement("img");
+            img.loading = "lazy"; img.alt = "Matched album photo";
+            img.src = "/admin/photo/" + ph.id;
+            const cap = document.createElement("figcaption");
+            cap.textContent = "score " + ph.score.toFixed(2);
+            fig.append(img, cap); grid.append(fig);
+          });
+        }
+      } catch (e) { tell("No connection to the app."); }
+      snap.disabled = false;
+    }
     open.addEventListener("click", async () => {
       try {
         stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: { ideal: 1280 } }, audio: false });
@@ -64,28 +97,20 @@
         cam.hidden = false; snap.hidden = false; open.hidden = true;
       } catch (e) { tell("Camera could not be opened. Allow camera access, or choose a photo below."); }
     });
-    snap.addEventListener("click", async () => {
+    snap.addEventListener("click", () => {
       if (!video.videoWidth) return tell("Camera is not ready yet.");
-      const c = document.createElement("canvas");
-      const k = Math.min(1, 1280 / Math.max(video.videoWidth, video.videoHeight));
-      c.width = Math.round(video.videoWidth * k); c.height = Math.round(video.videoHeight * k);
-      c.getContext("2d").drawImage(video, 0, 0, c.width, c.height);
-      snap.disabled = true; tell("Testing ...");
-      try {
-        const r = await fetch("/admin/events/" + box.dataset.eid + "/test-selfie", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-CSRF": box.dataset.csrf },
-          body: JSON.stringify({ image: c.toDataURL("image/jpeg", 0.92) }) });
-        tell(r.ok ? (await r.json()).text : "Please sign in again.");
-      } catch (e) { tell("No connection to the app."); }
-      snap.disabled = false;
+      test(video, video.videoWidth, video.videoHeight);
     });
-    box.addEventListener("toggle", () => {
-      if (!box.open && stream) {
-        stream.getTracks().forEach((t) => t.stop()); stream = null;
-        cam.hidden = true; snap.hidden = true; open.hidden = false;
-      }
+    file.addEventListener("change", () => {
+      const f = file.files[0];
+      if (!f) return;
+      const img = new Image();
+      img.onload = () => { test(img, img.naturalWidth, img.naturalHeight); URL.revokeObjectURL(img.src); };
+      img.onerror = () => tell("That file is not a picture. Choose a JPG or PNG photo.");
+      img.src = URL.createObjectURL(f);
+      file.value = "";
     });
+    box.addEventListener("toggle", () => { if (!box.open) stop(); });
   });
 
   // ---- live scan status

@@ -41,6 +41,8 @@ over many drives:
 
 | 19 | Test showed "album has 0 photos and 0 faces"; scanning too slow; admin wants to test by selfie like a guest; wants to know why a scan fails | Scanner rewritten: several photos at once, large photos opened at half size, photos findable while the scan runs, speed and time left shown. Status line now gives the reason for an empty album (wrong folder, only RAW/HEIC files, unreadable files, drive offline). Admin page has "Test with my own selfie" using the camera |
 
+| 20 | "Why download? The photos are already on Drive, scan them there." Also: not happy with the earlier work, check everything, make it work; admin test must work like the guest's; CI and tests for all platforms; phones and laptops | Whole repository reviewed and run. **Drive photos are no longer copied**: each one is read from Drive into memory at 1600 pixels (the size the scan uses), its face signatures are stored and the picture is dropped; previews and downloads pass straight from Drive to the guest; the old `data/drive` copy is deleted after the next scan. The scan starts while photos are still being found, continues after a restart if it was cut off, and re-scans are faster (missing database indexes added). The admin's selfie test now shows the matched photos, like a guest sees them. Phone layout added. GitHub Actions runs the tests on Windows, Linux and macOS |
+
 ## Files a user runs
 
 | File | Purpose |
@@ -60,7 +62,11 @@ over many drives:
   GPU scanning and a vector database.
 - The LAN certificate is self-made, so other devices show a browser warning
   once until the app is hosted on a domain.
-- Google Drive photos are copied to the local disk, which needs free space.
+- Google Drive photos are not stored on the PC, but each one still has to
+  travel over the internet once to be scanned (about 0.3 MB per photo), so
+  scan speed on Drive depends on the internet line.
+- A folder chosen through the `G:` letter of Google Drive for desktop is
+  downloaded by Windows itself; use the Drive link instead.
 - Face signatures are biometric personal data: take consent, tell people,
   and close albums when the job is done.
 
@@ -68,17 +74,25 @@ over many drives:
 
 - Tested automatically (`python tests/test_flow.py`): OTP rules, session and
   download-link rules, only-own-photos rule, approval mode, multiple drives,
-  offline drive, Drive-link sync with a stand-in for Google, VLAN lists,
-  certificate, busy-port fallback.
-- Not tested in the build environment (no internet there): real face
-  matching with the model files, real Google Drive access, real mail
-  sending, and the Windows-only steps (browser auto-open, certificate trust).
-  These are confirmed only when they run on the owner's PC.
+  offline drive, Drive links scanned in place with a stand-in for Google
+  (nothing written to disk, preview, download, zip, deletion, resume), admin
+  selfie test, VLAN lists, certificate, busy-port fallback.
+- Tested by running the real app (12 November, Linux build machine): HTTPS
+  start with the usual port busy (it moved to the next port), real face
+  models on 8 sample photos from 3 folders, admin test and full guest flow in
+  a browser at phone size (390 px) and laptop size (1366 px). The sample was
+  one person in several versions of the same picture, so it shows that the
+  engine works, not how accurate it is on a real wedding album.
+- Not tested (not possible on the build machine): real Google Drive access,
+  real mail sending, Windows-only steps (browser auto-open, certificate
+  trust), a real phone camera. The Windows and macOS test runs happen on
+  GitHub after the push.
 
 ## Open items
 
 1. Get OTP mail working on the office network (app password or Brevo).
 2. First real scan and selfie match on a small folder, to check accuracy.
-3. Connect Google Drive with a key file from a personal Google account.
+3. Connect Google Drive with a key file from a personal Google account, then
+   check on one real Drive folder that the scan reads photos without copying.
 4. Optional later: "Sign in with Google" instead of the key file, QR code for
    the guest link, hosting on a domain.

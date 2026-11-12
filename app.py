@@ -2,6 +2,7 @@
 only the photos they appear in. Run:  python app.py"""
 import base64
 import hashlib
+import io
 import hmac
 import json
 import os
@@ -13,6 +14,7 @@ import tempfile
 import time
 import zipfile
 from pathlib import Path
+from urllib.parse import quote
 
 from flask import (Flask, abort, g, jsonify, redirect, render_template,
                    request, send_file, session, url_for)
@@ -150,13 +152,56 @@ def allowed(s, photo_id):
 
 def real_path(folders, root, relpath):
     """Only files inside a folder that is still on the event's list."""
-    if root not in db.split_folders(folders):
+    if root not in db.split_folders(folders) or gdrive.is_drive(root):
         abort(404)
-    base = Path(gdrive.local_root(root)).resolve()
+    base = Path(root).resolve()
     p = (base / relpath).resolve()
     if base not in p.parents or not p.is_file():
         abort(404)      # also the case when that drive is offline
     return p
+
+
+def preview_file(row):
+    """The small watermarked preview of one photo (made once, then kept).
+    A Google Drive photo is read from Drive for this - it is never copied."""
+    if row["root"] not in db.split_folders(row["folders"]):
+        abort(404)
+    dest = config.CACHE_DIR / f"{row['id']}.jpg"
+    if not dest.exists():
+        if gdrive.is_drive(row["root"]):
+            if not row["ref"]:
+                abort(404)
+            try:
+                data = (gdrive.fetch_small({"id": row["ref"]}, 1200)
+                        or gdrive.fetch_full(row["ref"]))
+            except gdrive.DriveError:
+                abort(503)
+            make_preview(io.BytesIO(data), dest)
+        else:
+            make_preview(real_path(row["folders"], row["root"], row["relpath"]), dest)
+    return dest
+
+
+def drive_download(ref, name):
+    """Passes the original from Google Drive straight on to the guest."""
+    try:
+        r = gdrive.open_original(ref)
+    except gdrive.DriveError:
+        abort(503)
+
+    def chunks():
+        with r:
+            while True:
+                chunk = r.read(256 * 1024)
+                if not chunk:
+                    return
+                yield chunk
+    headers = {"Content-Disposition": "attachment; filename*=UTF-8''" + quote(name)}
+    if r.headers.get("Content-Length"):
+        headers["Content-Length"] = r.headers["Content-Length"]
+    return app.response_class(
+        chunks(), headers=headers,
+        mimetype=r.headers.get("Content-Type") or "application/octet-stream")
 
 
 def make_preview(src, dest):
@@ -181,6 +226,11 @@ def make_preview(src, dest):
 @app.get("/")
 def home():
     return render_template("guest.html", brand=config.BRAND, event=None), 404
+
+
+@app.get("/favicon.ico")
+def favicon():
+    return "", 204
 
 
 @app.get("/e/<code>")
@@ -346,12 +396,7 @@ def preview(pid):
     row = allowed(s, pid) if s else None
     if not row:
         abort(404)
-    if row["root"] not in db.split_folders(row["folders"]):
-        abort(404)
-    dest = config.CACHE_DIR / f"{pid}.jpg"
-    if not dest.exists():
-        make_preview(real_path(row["folders"], row["root"], row["relpath"]), dest)
-    return send_file(dest, mimetype="image/jpeg")
+    return send_file(preview_file(row), mimetype="image/jpeg")
 
 
 @app.post("/api/download-link/<what>")
@@ -383,7 +428,7 @@ def download(token):
         if s["status"] not in ("matched", "approved"):
             abort(403)
         rows = c.execute(
-            "SELECT p.relpath, p.root, e.folders FROM matches m JOIN photos p ON p.id=m.photo_id "
+            "SELECT p.relpath, p.root, p.ref, e.folders FROM matches m JOIN photos p ON p.id=m.photo_id "
             "JOIN events e ON e.id=p.event_id WHERE m.session_id=?", (s["id"],)).fetchall()
         if not rows:
             abort(404)
@@ -391,25 +436,44 @@ def download(token):
         with zipfile.ZipFile(tmp, "w", zipfile.ZIP_STORED) as z:
             n = 0
             for r in rows:
-                base = Path(gdrive.local_root(r["root"]))
+                if r["root"] not in db.split_folders(r["folders"]):
+                    continue
+                name = Path(r["relpath"]).name
+                if gdrive.is_drive(r["root"]):       # straight from Drive into the zip
+                    try:
+                        src = gdrive.open_original(r["ref"])
+                    except gdrive.DriveError:
+                        continue
+                    n += 1
+                    with src, z.open(f"{n:04d}_{name}", "w", force_zip64=True) as dst:
+                        while True:
+                            chunk = src.read(1024 * 1024)
+                            if not chunk:
+                                break
+                            dst.write(chunk)
+                    continue
+                base = Path(r["root"])
                 p = base / r["relpath"]
-                if r["root"] in db.split_folders(r["folders"]) and p.is_file() \
-                        and base.resolve() in p.resolve().parents:
+                if p.is_file() and base.resolve() in p.resolve().parents:
                     n += 1          # photos on an offline drive are left out
-                    z.write(p, f"{n:04d}_{p.name}")
+                    z.write(p, f"{n:04d}_{name}")
             if not n:
                 abort(404)
         tmp.seek(0)
-        db.audit(c, "download_all", s["email"], s["event_id"], f"{len(rows)} photos", ip())
+        db.audit(c, "download_all", s["email"], s["event_id"], f"{n} photos", ip())
         c.commit()
         return send_file(tmp, mimetype="application/zip", as_attachment=True,
                          download_name="my-photos.zip")
     row = allowed(s, int(data["p"]))
     if not row:
         abort(403)
-    p = real_path(row["folders"], row["root"], row["relpath"])
+    if row["root"] not in db.split_folders(row["folders"]):
+        abort(404)
     db.audit(c, "download", s["email"], s["event_id"], row["relpath"], ip())
     c.commit()
+    if gdrive.is_drive(row["root"]):
+        return drive_download(row["ref"], Path(row["relpath"]).name)
+    p = real_path(row["folders"], row["root"], row["relpath"])
     return send_file(p, as_attachment=True, download_name=p.name)
 
 
@@ -484,8 +548,7 @@ def admin():
         e["photos"] = c.execute("SELECT COUNT(*) FROM photos WHERE event_id=?", (e["id"],)).fetchone()[0]
         e["faces"] = c.execute("SELECT COUNT(*) FROM faces WHERE event_id=?", (e["id"],)).fetchone()[0]
         e["status"], e["state"] = status_text(e["id"], e["photos"], e["faces"])
-        e["folder_list"] = [(gdrive.label(f), Path(gdrive.local_root(f)).is_dir()
-                             or f.startswith("gdrive:"))
+        e["folder_list"] = [(gdrive.label(f), gdrive.is_drive(f) or Path(f).is_dir())
                             for f in db.split_folders(e["folders"])]
         e["link"] = guest_link(e["code"])
         events.append(e)
@@ -510,16 +573,23 @@ def status_text(eid, photos, faces):
     if p.get("state") == "running":
         if p.get("phase"):
             return p["phase"], "running"
-        if not p.get("total"):
-            return "Getting ready - counting the photos ...", "running"
-        text = f"Scanning ... {p['done']} of {p['total']} photos"
+        done, total = p.get("done", 0), p.get("total", 0)
+        if not total:
+            return "Looking for photos ...", "running"
+        if p.get("listing"):
+            text = f"Scanning ... {done} photos done, {total} found so far (still looking for more)"
+        else:
+            text = f"Scanning ... {done} of {total} photos"
         took = time.time() - p.get("started", 0)
         if p.get("scanned", 0) >= 10 and took > 0:
             rate = p["scanned"] / took
-            left = (p["total"] - p["done"]) / rate / 60
-            text += (f" ({rate:.1f} photos per second, about "
-                     + (f"{left / 60:.1f} hours" if left >= 90 else f"{max(1, round(left))} minutes")
-                     + " left). Photos already scanned can be found now.")
+            text += f" - {rate:.1f} photos per second"
+            if not p.get("listing"):
+                left = (total - done) / rate / 60
+                text += (", about " + (f"{left / 60:.1f} hours" if left >= 90
+                                       else f"{max(1, round(left))} minutes") + " left")
+        if done:
+            text += ". Photos already scanned can be found now."
         return text, "running"
     if p.get("state") == "failed":
         return "Scan failed. " + err_text, "failed"
@@ -603,9 +673,9 @@ def _clean_folders(text):
             if not gdrive.key_info():
                 bad.append("Google Drive is not connected yet - see 'Google Drive links' on this page")
                 continue
-            if not (config.DRIVE_DIR / fid / ".name").exists():
+            if not gdrive.known_name(fid):
                 try:                      # check right now that the robot can see it
-                    gdrive.folder_name(fid)
+                    gdrive.remember_name(fid, gdrive.folder_name(fid))
                 except gdrive.DriveError as e:
                     bad.append(str(e))
                     continue
@@ -702,6 +772,33 @@ def _test_message(eid, img):
     return msg
 
 
+def _test_photos(eid, img, limit=60):
+    """The photos a guest with this face would get (best first)."""
+    try:
+        vecs = faces.get_engine().embed(img)
+    except Exception:
+        return []
+    best = {}
+    for v in vecs:
+        for pid, score in indexer.search(con(), eid, v):
+            best[pid] = max(score, best.get(pid, 0))
+    top = sorted(best.items(), key=lambda x: -x[1])[:limit]
+    return [dict(id=pid, score=round(score, 2)) for pid, score in top]
+
+
+@app.get("/admin/photo/<int:pid>")
+def admin_photo(pid):
+    """Preview of one album photo, for the admin's own test."""
+    if not is_admin():
+        abort(403)
+    row = con().execute(
+        "SELECT p.*, e.folders FROM photos p JOIN events e ON e.id=p.event_id WHERE p.id=?",
+        (pid,)).fetchone()
+    if not row:
+        abort(404)
+    return send_file(preview_file(row), mimetype="image/jpeg")
+
+
 @app.post("/admin/events/<int:eid>/test-selfie")
 def admin_event_test_selfie(eid):
     """Admin takes a live selfie on the admin page, exactly like a guest."""
@@ -714,8 +811,8 @@ def admin_event_test_selfie(eid):
     except Exception:
         img = None
     if img is None:
-        return jsonify(text="Could not read the picture.")
-    return jsonify(text=_test_message(eid, img))
+        return jsonify(text="Could not read the picture.", photos=[])
+    return jsonify(text=_test_message(eid, img), photos=_test_photos(eid, img))
 
 
 @app.post("/admin/events/<int:eid>/test")
@@ -779,9 +876,13 @@ def startup_checks():
         return
     c = db.connect()
     try:
+        cut_off = indexer.unfinished(c)
         for e in c.execute("SELECT id, name FROM events WHERE active=1").fetchall():
             n = c.execute("SELECT COUNT(*) FROM photos WHERE event_id=?", (e["id"],)).fetchone()[0]
-            if not n:
+            if e["id"] in cut_off:
+                print(f"Album '{e['name']}': the last scan was cut off - continuing it now.")
+                indexer.start_index(e["id"])
+            elif not n:
                 print(f"Album '{e['name']}' has no scanned photos - scanning it now.")
                 indexer.start_index(e["id"])
     finally:
