@@ -39,7 +39,8 @@ For photos that are on Google Drive, use the link (Option A), not the <code>G:</
   <button type="button" class="small ghost" id="b-close">Close</button></div>
 </div>
 <textarea id="folders" name="folders" rows="3" required placeholder="https://drive.google.com/drive/folders/...   or   D:\Photos\Sharma"></textarea>
-<label class="check"><input type="checkbox" name="approval" checked><span>Ask me before a guest gets photos (safest). Untick to give photos automatically.</span></label>
+<label class="check"><input type="checkbox" name="approval"><span>Ask me before a guest gets photos. Leave unticked to give photos at once; every download is recorded with the guest's name, phone and email.</span></label>
+<p class="hint">Photo types read: JPG, PNG, WEBP, BMP, TIFF, HEIC (iPhone) and camera RAW files (ARW, CR2, CR3, NEF, DNG, RAF, RW2, ORF and more).</p>
 <button type="submit">Create album and scan photos</button>
 </form>
 
@@ -110,6 +111,26 @@ For photos that are on Google Drive, use the link (Option A), not the <code>G:</
   <textarea id="fl{{ e.id }}" name="folders" rows="3">{{ e.folders }}</textarea><button class="small">Save and scan</button></form></details>
 </div>
 {% else %}<p class="card wide">No albums yet. Add one in Step 1.</p>{% endfor %}
+
+<h2>Who downloaded photos</h2>
+<div class="card wide">
+<p class="hint">Every guest who signed in, with the photos they downloaded. <a href="{{ url_for('admin_downloads_csv') }}">Download the full record for Excel</a></p>
+{% if people %}<div class="scroll"><table>
+<tr><th>Name</th><th>Phone</th><th>Email</th><th>Photos downloaded</th><th>Saved</th><th>Last download</th></tr>
+{% for u in people %}<tr><td>{{ u.name }}</td><td>{{ u.phone }}</td><td>{{ u.email }}</td>
+<td>{% if u.n %}<details><summary>{{ u.n }} photos</summary><ul class="files">{% for f in u.files %}<li>{{ f.relpath }}{% if f.album %} <span class="hint">({{ f.album }}, {{ fmt(f.ts) }})</span>{% endif %}</li>{% endfor %}</ul></details>{% else %}0{% endif %}</td>
+<td>{{ u.saved }}</td><td>{{ fmt(u.last_dl) if u.last_dl else "-" }}</td></tr>{% endfor %}
+</table></div>{% else %}<p>No guest has signed in yet.</p>{% endif %}
+</div>
+
+<h2>Match strictness</h2>
+<form class="card wide" method="post" action="{{ url_for('admin_settings') }}">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<label for="threshold">How alike two faces must be (0.30 to 0.80)</label>
+<input id="threshold" name="threshold" type="number" min="0.30" max="0.80" step="0.01" value="{{ threshold }}" required>
+<p class="hint">Higher = fewer photos of other people, but some of the guest's own photos may be missed. Lower = more photos found, more mistakes. To choose: use "Test with my own selfie" on an album. Each photo shows its score. If a photo of another person appears with score 0.52, set this just above it, for example 0.55. No new scan is needed.</p>
+<button type="submit">Save strictness</button>
+</form>
 
 <details class="logbox"><summary>Activity log (who got a code, who downloaded)</summary>
 <div class="card wide scroll"><table>

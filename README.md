@@ -41,6 +41,15 @@ their photos from every open album inside those dates, grouped by event.
 Albums without a date are reachable only through their own link. Set
 `PORTAL=0` in `.env` to switch the general link off.
 
+## Guest accounts, saved photos, download record
+
+Guests sign in with name, phone and email (a code is sent to the email).
+Under every photo there is **Save**; saved photos are kept for that email
+and open at the next sign-in without a new selfie. The admin page lists
+**Who downloaded photos** (name, phone, email, which photos) and offers the
+full record as a file for Excel. **Match strictness** on the admin page sets
+how alike two faces must be; use "Test with my own selfie" to see the scores.
+
 ## Photos from many drives
 
 When you create an event, type one folder per line – from as many drives as
@@ -162,7 +171,8 @@ Never expose the app to the internet over plain `http://`.
   Scanning runs on the CPU at roughly a few photos per second. Crores of
   photos need the bigger setup (GPU scanning + a vector database such as
   Milvus); `faces.py` and `indexer.py` are the two files to swap.
-- HEIC and RAW files are skipped; JPG, PNG, WEBP and BMP are read.
+- Photo types read: JPG, PNG, WEBP, BMP, TIFF, HEIC (needs `pillow-heif`, installed by
+  `start.bat`) and camera RAW files (ARW, CR2, CR3, NEF, DNG, RAF, RW2, ORF ...).
 - Face signatures are biometric personal data. Take consent (the guest page
   asks for it), tell people at the event, and close the event link when the
   job is done.

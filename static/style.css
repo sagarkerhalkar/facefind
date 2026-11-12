@@ -11,7 +11,7 @@ h2 { font-size:18px; margin:28px 0 10px; }
 .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:22px; max-width:460px; margin:0 auto 16px; }
 .card.wide { max-width:none; }
 label { display:block; font-weight:600; margin:14px 0 6px; }
-input[type=email], input[type=text], input[type=password], input[type=date], input:not([type]) { width:100%; padding:12px; font:inherit; border:1px solid #aab4be; border-radius:8px; }
+input[type=email], input[type=text], input[type=password], input[type=date], input[type=tel], input[type=number], input:not([type]) { width:100%; padding:12px; font:inherit; border:1px solid #aab4be; border-radius:8px; }
 input:focus-visible, button:focus-visible { outline:3px solid #7cc4bb; outline-offset:2px; }
 .check { display:flex; gap:10px; font-weight:400; font-size:14px; color:var(--soft); align-items:flex-start; }
 .check input { margin-top:4px; }
@@ -95,3 +95,14 @@ header form.inline { margin-left:auto; }
 .dates { margin-bottom:14px; }
 .dates > div { min-width:130px; }
 .grid figcaption { word-break:break-word; }
+.grid .acts { display:flex; gap:8px; padding:10px; }
+.grid .acts button { margin:0; flex:1; padding:10px 6px; }
+button[aria-pressed=true] { background:#e3f4ea; color:#14532d; border-color:#14532d; }
+fieldset { border:1px solid var(--line); border-radius:8px; margin:14px 0 0; padding:8px 14px 14px; }
+legend { font-weight:600; padding:0 6px; }
+fieldset .check { margin:10px 0 0; font-size:16px; color:var(--ink); }
+fieldset .check input { width:20px; height:20px; margin-top:2px; }
+#ev-load, #ev-next { width:100%; }
+@media (max-width:600px) { .grid .acts { flex-direction:column; gap:6px; padding:8px; } }
+ul.files { margin:6px 0 0; padding-left:18px; max-height:220px; overflow:auto; word-break:break-all; }
+a { color:var(--brand); }

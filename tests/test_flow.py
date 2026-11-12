@@ -56,20 +56,22 @@ assert "Copy link" in page and "Ready - 5 photos" in page
 print("ok  admin login, CSRF, event with 2 drives indexed (5 photos)")
 
 def login(client, email):
-    r = client.post("/api/otp/send", json={"code": code, "email": email, "consent": True}, headers=H)
+    r = client.post("/api/otp/send", json={"code": code, "email": email, "consent": True, "name": "Test Guest", "phone": "98765 43210"}, headers=H)
     assert r.status_code == 200, r.json
     r = client.post("/api/otp/verify", json={"code": code, "email": email, "otp": sent[email]}, headers=H)
     assert r.status_code == 200, r.json
 
 g = A.app.test_client()
 assert g.get("/e/" + code).status_code == 200 and g.get("/e/wrong").status_code == 404
-assert g.post("/api/otp/send", json={"code": code, "email": "a@x.com", "consent": True}).status_code == 403
+assert g.post("/api/otp/send", json={"code": code, "email": "a@x.com", "consent": True, "name": "Test Guest", "phone": "98765 43210"}).status_code == 403
 assert g.post("/api/otp/send", json={"code": code, "email": "a@x.com"}, headers=H).status_code == 400
+assert g.post("/api/otp/send", json={"code": code, "email": "a@x.com", "consent": True, "name": "A", "phone": "9876543210"}, headers=H).status_code == 400   # no name
+assert g.post("/api/otp/send", json={"code": code, "email": "a@x.com", "consent": True, "name": "Asha", "phone": "12"}, headers=H).status_code == 400       # no phone
 assert g.get("/api/me").status_code == 401
 assert g.post("/api/selfie", json={"image": img(RED)}, headers=H).status_code == 401
 assert g.get("/api/preview/1").status_code == 404
 # wrong OTP 5 times locks the code, even for the right one afterwards
-g.post("/api/otp/send", json={"code": code, "email": "a@x.com", "consent": True}, headers=H)
+g.post("/api/otp/send", json={"code": code, "email": "a@x.com", "consent": True, "name": "Test Guest", "phone": "98765 43210"}, headers=H)
 real = sent["a@x.com"]; wrong = "000000" if real != "000000" else "111111"
 for _ in range(5):
     assert g.post("/api/otp/verify", json={"code": code, "email": "a@x.com", "otp": wrong}, headers=H).status_code == 400
@@ -77,7 +79,7 @@ assert g.post("/api/otp/verify", json={"code": code, "email": "a@x.com", "otp": 
 assert g.get("/api/me").status_code == 401
 print("ok  nothing works before OTP; wrong codes lock out")
 # expired code
-g.post("/api/otp/send", json={"code": code, "email": "a@x.com", "consent": True}, headers=H)
+g.post("/api/otp/send", json={"code": code, "email": "a@x.com", "consent": True, "name": "Test Guest", "phone": "98765 43210"}, headers=H)
 con.execute("UPDATE otps SET expires_at=? WHERE used=0", (time.time() - 1,)); con.commit()
 assert g.post("/api/otp/verify", json={"code": code, "email": "a@x.com", "otp": sent["a@x.com"]}, headers=H).status_code == 400
 login(g, "a@x.com")
@@ -85,7 +87,7 @@ login(g, "a@x.com")
 g2 = A.app.test_client()
 assert g2.post("/api/otp/verify", json={"code": code, "email": "a@x.com", "otp": sent["a@x.com"]}, headers=H).status_code == 400
 # 4th send in 15 min is rate limited
-assert g.post("/api/otp/send", json={"code": code, "email": "a@x.com", "consent": True}, headers=H).status_code == 429
+assert g.post("/api/otp/send", json={"code": code, "email": "a@x.com", "consent": True, "name": "Test Guest", "phone": "98765 43210"}, headers=H).status_code == 429
 print("ok  expiry, single use, rate limit")
 
 assert g.post("/api/selfie", json={"image": img(BLACK)}, headers=H).status_code == 400   # no face
@@ -114,15 +116,15 @@ ap = adm.get(f"/admin/photo/{tj['photos'][0]['id']}"); assert ap.status_code == 
 assert A.app.test_client().get(f"/admin/photo/{tj['photos'][0]['id']}").status_code == 403
 assert g.get(f"/admin/photo/{tj['photos'][0]['id']}").status_code == 403      # a guest is not an admin
 assert adm.post(f"/admin/events/{ev['id']}/test-selfie", json={"image": img(BLUE)}).status_code == 403
-# a folder with only RAW / HEIC files explains itself
-rawd = tmp / "raw"; rawd.mkdir(); (rawd / "a.CR2").write_bytes(b"x"); (rawd / "b.heic").write_bytes(b"x")
+# a folder without photos explains itself
+rawd = tmp / "raw"; rawd.mkdir(); (rawd / "a.PSD").write_bytes(b"x"); (rawd / "b.mp4").write_bytes(b"x")
 adm.post("/admin/events", data={"name": "Raw", "csrf": csrf, "folders": str(rawd)})
 rid = con.execute("SELECT id FROM events WHERE name='Raw'").fetchone()[0]
 for _ in range(50):
     if indexer.progress.get(rid, {}).get("state") == "finished": break
     time.sleep(0.1)
 rst = adm.get("/admin/status").json[str(rid)]["text"]
-assert "No JPG / PNG / WEBP photos were found" in rst and ".cr2" in rst, rst
+assert "No photos were found" in rst and ".psd" in rst, rst
 (rawd / "broken.jpg").write_bytes(b"not a jpeg"); indexer.index_event(rid)
 assert "1 files could not be read" in adm.get("/admin/status").json[str(rid)]["text"]
 print("ok  guest sees only own photos (from both drives), others are 404")
@@ -303,7 +305,7 @@ adm.post(f"/admin/requests/{psid}/approve", data={"csrf": csrf})
 assert len(pg.get("/api/me").json["photos"]) == 2
 config.PORTAL = False
 assert A.app.test_client().get("/").status_code == 404
-assert pg.post("/api/otp/send", json={"code": "", "email": "q@x.com", "consent": True}, headers=H).status_code == 404
+assert pg.post("/api/otp/send", json={"code": "", "email": "q@x.com", "consent": True, "name": "Test Guest", "phone": "98765 43210"}, headers=H).status_code == 404
 assert find("2026-11-01", "2026-11-30").status_code == 404
 config.PORTAL = True; code = keep3
 # the scan says where its time goes, and a missing photo says why
@@ -313,6 +315,67 @@ assert "Last scan: 2 photos" in stt and "to read it" in stt and "to find the fac
 for f in config.CACHE_DIR.glob(f"{gone}-*.jpg"): f.unlink()
 why = adm.get(f"/admin/photo/{gone}"); assert why.status_code == 404 and "file not found" in why.get_data(as_text=True), why.data
 print("ok  general link: one sign-in, date range over several albums, approval, own photos only; scan timing; missing-photo reason")
+
+# personal sign-in: choose events, save photos for later, admin sees who downloaded what
+con.execute("DELETE FROM otps"); con.commit(); sent.clear()
+img(RED, pa / "r.png")                       # the photo removed in the check above is back
+keep4 = code; code = ""; u1 = A.app.test_client(); login(u1, "u1@x.com")
+assert A.app.test_client().get("/api/events?from=2026-11-01&to=2026-11-30").status_code == 401
+evs = u1.get("/api/events?from=2026-11-01&to=2026-11-30").json["events"]
+assert [e["name"] for e in evs] == ["Wedding", "Haldi"], evs
+adm.post(f"/admin/events/{pid_of['Wedding']}/approval", data={"csrf": csrf})      # approval off again
+sel = {"image": img(RED), "date_from": "2026-11-01", "date_to": "2026-11-30"}
+assert u1.post("/api/selfie", json=dict(sel, events=[]), headers=H).status_code == 400
+assert u1.post("/api/selfie", json=dict(sel, events=[999999]), headers=H).status_code == 400
+only = u1.post("/api/selfie", json=dict(sel, events=[pid_of["Haldi"]]), headers=H).json
+assert only["status"] == "matched" and [x["name"] for x in only["groups"]] == ["Haldi"] and only["name"] == "Test Guest", only
+mine1 = only["photos"][0]
+assert u1.post(f"/api/bookmark/{blue_h}", json={"on": True}, headers=H).status_code == 404     # cannot save someone else's
+assert u1.post(f"/api/bookmark/{mine1}", json={"on": True}).status_code == 403                  # needs our page
+assert u1.post(f"/api/bookmark/{mine1}", json={"on": True}, headers=H).json["on"] is True
+assert u1.get("/api/me").json["saved"] == [mine1]
+u1.get(u1.post(f"/api/download-link/{mine1}", json={}, headers=H).json["url"])
+assert u1.post("/api/forget", json={}, headers=H).status_code == 200
+# next visit: sign in again, saved photos are there without a new selfie; others still are not
+con.execute("DELETE FROM otps"); con.commit(); sent.clear(); u2 = A.app.test_client(); login(u2, "u1@x.com")
+bk = u2.get("/api/bookmarks").json["groups"]; assert bk[0]["name"] == "Haldi" and bk[0]["photos"] == [mine1], bk
+assert u2.get(f"/api/preview/{mine1}").status_code == 200 and u2.get(f"/api/preview/{blue_h}").status_code == 404
+zs = u2.get(u2.post("/api/download-link/saved", json={}, headers=H).json["url"])
+assert len(zipfile.ZipFile(io.BytesIO(zs.data)).namelist()) == 1
+con.execute("DELETE FROM otps"); con.commit(); sent.clear(); u3 = A.app.test_client(); login(u3, "other@x.com")
+assert u3.get(f"/api/preview/{mine1}").status_code == 404 and u3.get("/api/bookmarks").json["groups"] == []
+assert u2.post(f"/api/bookmark/{mine1}", json={"on": False}, headers=H).json["on"] is False
+assert u2.get(f"/api/preview/{mine1}").status_code == 404           # un-saved and no selfie this visit
+apage = adm.get("/admin").data.decode()
+assert "Who downloaded photos" in apage and "Test Guest" in apage and "9876543210" in apage and "u1@x.com" in apage
+csvt = adm.get("/admin/downloads.csv").get_data(as_text=True)
+assert "Test Guest,9876543210,u1@x.com,Haldi," in csvt and A.app.test_client().get("/admin/downloads.csv").status_code == 403
+assert con.execute("SELECT COUNT(*) FROM downloads WHERE email='u1@x.com'").fetchone()[0] == 2    # one single + one in the zip
+# match strictness is set by the admin and applies at once
+assert adm.post("/admin/settings", data={"csrf": csrf, "threshold": "0.75"}).status_code == 302 and config.MATCH_THRESHOLD == 0.75
+assert adm.post("/admin/settings", data={"csrf": csrf, "threshold": "5"}, follow_redirects=True).data.count(b"Not saved") == 1
+assert adm.post("/admin/settings", data={"threshold": "0.5"}).status_code == 403
+adm.post("/admin/settings", data={"csrf": csrf, "threshold": "0.45"}); assert config.MATCH_THRESHOLD == 0.45
+code = keep4
+print("ok  sign-in with name and phone, event choice, saved photos across visits, download record, strictness")
+
+# more photo types: a camera RAW file (its embedded JPEG is used) and, when installed, HEIC
+import cv2 as _cv
+rawdir = tmp / "rawok"; rawdir.mkdir()
+_ok, _jpg = _cv.imencode(".jpg", np.full((1200, 1600, 3), (0, 0, 255), np.uint8))       # red in BGR
+(rawdir / "DSC001.ARW").write_bytes(b"II*\x00" + bytes(4096) + _jpg.tobytes() + bytes(2048))
+kinds = 1
+try:
+    import pillow_heif
+    pillow_heif.register_heif_opener(); Image.new("RGB", (640, 480), RED).save(rawdir / "IMG_1.heic"); kinds = 2
+except ImportError:
+    print("    (pillow-heif not installed here - HEIC part skipped)")
+adm.post("/admin/events", data={"name": "Formats", "csrf": csrf, "folders": str(rawdir)})
+fev = con.execute("SELECT * FROM events WHERE name='Formats'").fetchone(); wait(fev["id"])
+assert con.execute("SELECT COUNT(*) FROM faces WHERE event_id=?", (fev["id"],)).fetchone()[0] == kinds, indexer.progress[fev["id"]]
+for (fp,) in con.execute("SELECT id FROM photos WHERE event_id=?", (fev["id"],)).fetchall():
+    pr = adm.get(f"/admin/photo/{fp}"); assert pr.status_code == 200 and pr.mimetype == "image/jpeg", pr.data
+print(f"ok  RAW{' and HEIC' if kinds == 2 else ''} photos are scanned and previewed")
 
 # LAN / VLAN rules
 import netutil

@@ -1,0 +1,4 @@
+# Optional: more photo types. start.bat installs these if it can; the app
+# works without them (RAW files then use the picture embedded by the camera).
+pillow-heif>=0.16
+rawpy>=0.21

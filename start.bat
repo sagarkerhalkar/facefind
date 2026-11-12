@@ -9,6 +9,8 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
+python -m pip install --no-cache-dir --retries 5 --timeout 60 -r requirements-formats.txt
+if errorlevel 1 echo (HEIC / RAW support could not be installed - the app still works for other photos.)
 python download_models.py
 if errorlevel 1 (
   pause

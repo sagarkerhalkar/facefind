@@ -45,6 +45,8 @@ over many drives:
 
 | 21 | Screenshot: the admin test finds many photos (scores 0.60+) but the pictures do not show. Scanning still slow, "show why". A guest who attended several events should not need one link per event: sign in with email, choose a date range; the admin gives each event a date | **General link**: one link for everyone; the guest signs in once (email + code), chooses from/to dates, takes one selfie and gets photos from every open album whose date is inside the range, grouped by event. Each album has a "Date of the event" (set when creating, changeable later); albums without a date are reachable only by their own link. If any matched album has "Ask me first" ON, the request waits for approval. **Why slow**: the status line now shows the time per photo for reading and for finding faces, and how many Drive photos had to be read in full size. **Missing pictures**: the admin test now writes the reason under each photo that cannot be shown, and Drive photos scanned by the older version are shown from their old copy until the next scan. New setting `SCAN_SIDE` (1280 is about a third faster, may miss small faces). The first GitHub test run found a Windows-only fault (a preview file in use stopped the scan); fixed |
 
+| 22 | Personal login; after login choose the date range, then the events (several), then selfie, preview, download; bookmark photos for later; no approval, but the admin must have a record of name, phone, email and which photos were downloaded; scan all photo types (JPG, ARW, HEIC ...); a selfie still shows another person's photo - "must be 100% proof" | **Sign-in** now asks name, phone and email (code goes to the email; the phone is recorded, not verified). **General link flow**: dates, tick the events, selfie, photos grouped by event. **Save** button under every photo; saved photos are kept per email and open at the next sign-in without a new selfie ("My saved photos", "Download all saved"). **New albums give photos without approval** by default (the switch is still there). **Who downloaded photos** on the admin page: name, phone, email, number of photos, the file names, and a full record file for Excel. **Photo types**: TIFF, HEIC (iPhone) and camera RAW (ARW, CR2, CR3, NEF, DNG, RAF, RW2, ORF ...) are read; on Google Drive they use Google's ready-made picture. **Wrong person**: default strictness raised from 0.36 to 0.45 and made a setting on the admin page ("Match strictness"); the admin test shows the score of every photo so the bar can be set just above a wrong match. No face system is 100% - stated again |
+
 ## Files a user runs
 
 | File | Purpose |
@@ -56,6 +58,12 @@ over many drives:
 
 ## Known limits (stated during the conversation)
 
+- Face matching is never 100%: look-alikes, small or blurred faces can give a
+  wrong photo. Higher strictness means fewer wrong photos and more missed ones.
+- Without approval and without a liveness check, a person can upload someone
+  else's face picture and receive that person's photos. The download record
+  shows who did it, afterwards.
+- The phone number is typed by the guest and is not verified.
 - "100% security" does not exist. The app locks photos to a verified email,
   uses expiring links, rate limits and a log of every action.
 - No automatic liveness check. Someone could show another person's picture

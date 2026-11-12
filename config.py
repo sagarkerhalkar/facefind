@@ -88,10 +88,12 @@ OTP_PER_IP = 10            # sends per 15 minutes
 SESSION_TTL = int(os.environ.get("SESSION_HOURS", "2")) * 3600
 SELFIE_MAX_TRIES = 30      # per verified session; after that the email is verified again
 DOWNLOAD_LINK_TTL = 120    # seconds
-# 0.363 is the value the face model's authors publish for "same person".
-# (0.40 was this app's first default and proved too strict for selfies.)
+# How alike two faces must be to count as the same person (0 to 1). The face
+# model's authors publish 0.363 for comparing two pictures; when one selfie is
+# compared with thousands of faces that lets other people through, so the
+# default is stricter. It can be changed on the admin page ("Match strictness").
 _thr = os.environ.get("MATCH_THRESHOLD", "").strip()
-MATCH_THRESHOLD = 0.363 if _thr in ("", "0.40") else float(_thr)
+MATCH_THRESHOLD = float(_thr) if _thr not in ("", "0.40", "0.363") else 0.45
 MAX_RESULTS = 500
 PREVIEW_SIDE = 900
 # Photos scanned at the same time. More = faster, but the PC gets busier.
@@ -106,6 +108,9 @@ DRIVE_SCAN_SIDE = SCAN_SIDE  # size asked from Drive for scanning
 # and all open albums with a date in that range are searched.
 PORTAL = _b("PORTAL", "1")
 MAX_PHOTO_BYTES = 120 * 1024 * 1024
-OTHER_EXT = {".heic", ".heif", ".cr2", ".cr3", ".nef", ".arw", ".dng", ".raf", ".rw2",
-             ".orf", ".tif", ".tiff", ".gif", ".psd"}   # seen but not readable
-IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+HEIC_EXT = {".heic", ".heif"}                                  # iPhone photos
+RAW_EXT = {".arw", ".cr2", ".cr3", ".nef", ".nrw", ".dng", ".raf", ".rw2", ".orf", ".pef",
+           ".srw", ".sr2", ".3fr", ".erf", ".kdc", ".mrw", ".x3f"}   # camera RAW files
+IMAGE_EXT = {".jpg", ".jpeg", ".jpe", ".jfif", ".png", ".webp", ".bmp", ".tif", ".tiff"} \
+    | HEIC_EXT | RAW_EXT
+OTHER_EXT = {".gif", ".psd", ".mp4", ".mov", ".avi", ".pdf"}   # seen but not photos
