@@ -46,6 +46,9 @@ if config.TRUST_PROXY:
 db.init()
 signer = URLSafeTimedSerializer(config.SECRET_KEY, salt="download")
 EMAIL_RE = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]{2,}")
+DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+# The general link: not one album, but every open album in the guest's dates.
+PORTAL = {"id": 0, "name": config.BRAND, "code": ""}
 COOKIE = "ff_session"
 
 
@@ -89,7 +92,7 @@ def _network_guard():
 def guest_link(code):
     """Link to share with guests: your domain if set, else this computer's
     LAN address (never 127.0.0.1, which only works on this computer)."""
-    path = url_for("event_page", code=code)
+    path = url_for("event_page", code=code) if code else url_for("home")
     if config.PUBLIC_URL:
         return config.PUBLIC_URL + path
     host = request.host
@@ -130,6 +133,23 @@ def event_by_code(code):
         "SELECT * FROM events WHERE code=? AND active=1", (code,)).fetchone()
 
 
+def event_for(code):
+    """An album's own link, or the general link (code "")."""
+    if code == "" and config.PORTAL:
+        return PORTAL
+    return event_by_code(code)
+
+
+def old_copy(row):
+    """A Drive photo scanned by an older version of this app has no Drive id
+    yet (the next scan adds it). Until then its old copy on disk is used."""
+    if row["ref"] or not gdrive.is_drive(row["root"]):
+        return None
+    base = (config.DRIVE_DIR / row["root"][7:]).resolve()
+    p = (base / row["relpath"]).resolve()
+    return p if base in p.parents and p.is_file() else None
+
+
 def guest():
     """The verified guest session for this browser, or None."""
     tok = request.cookies.get(COOKIE)
@@ -163,22 +183,33 @@ def real_path(folders, root, relpath):
 
 def preview_file(row):
     """The small watermarked preview of one photo (made once, then kept).
-    A Google Drive photo is read from Drive for this - it is never copied."""
+    A Google Drive photo is read from Drive for this - it is never copied.
+    When it cannot be made, g.why says why (shown to the admin)."""
     if row["root"] not in db.split_folders(row["folders"]):
+        g.why = "its folder was taken off the album"
         abort(404)
     dest = indexer.preview_path(row)
-    if not dest.exists():
-        if gdrive.is_drive(row["root"]):
+    if dest.exists():
+        return dest
+    try:
+        if gdrive.is_drive(row["root"]) and not old_copy(row):
             if not row["ref"]:
+                g.why = "scanned by an older version - press 'Scan again' and wait for green"
                 abort(404)
             try:
                 data = (gdrive.fetch_small({"id": row["ref"]}, 1200)
                         or gdrive.fetch_full(row["ref"]))
-            except gdrive.DriveError:
+            except gdrive.DriveError as e:
+                g.why = f"Google Drive: {e}"
                 abort(503)
             make_preview(io.BytesIO(data), dest)
         else:
-            make_preview(real_path(row["folders"], row["root"], row["relpath"]), dest)
+            g.why = "file not found - the drive is not connected, or the photo was moved"
+            src = old_copy(row) or real_path(row["folders"], row["root"], row["relpath"])
+            make_preview(src, dest)
+    except (OSError, ValueError) as e:        # unreadable or damaged picture
+        g.why = f"the picture could not be opened ({e})"
+        abort(404)
     return dest
 
 
@@ -225,7 +256,12 @@ def make_preview(src, dest):
 # ------------------------------------------------------------ guest pages
 @app.get("/")
 def home():
-    return render_template("guest.html", brand=config.BRAND, event=None), 404
+    if not config.PORTAL:
+        return render_template("guest.html", brand=config.BRAND, event=None, portal=False), 404
+    today = time.strftime("%Y-%m-%d")
+    month_ago = time.strftime("%Y-%m-%d", time.localtime(time.time() - 30 * 86400))
+    return render_template("guest.html", brand=config.BRAND, event=None, portal=True,
+                           today=today, month_ago=month_ago)
 
 
 @app.get("/favicon.ico")
@@ -237,14 +273,14 @@ def favicon():
 def event_page(code):
     ev = event_by_code(code)
     if not ev:
-        return render_template("guest.html", brand=config.BRAND, event=None), 404
-    return render_template("guest.html", brand=config.BRAND, event=ev)
+        return render_template("guest.html", brand=config.BRAND, event=None, portal=False), 404
+    return render_template("guest.html", brand=config.BRAND, event=ev, portal=False)
 
 
 @app.post("/api/otp/send")
 def otp_send():
     d = request.get_json(silent=True) or {}
-    ev = event_by_code(d.get("code"))
+    ev = event_for(d.get("code"))
     email = str(d.get("email") or "").strip().lower()
     if not ev:
         return err("This link is not valid.", 404)
@@ -281,7 +317,7 @@ def otp_send():
 @app.post("/api/otp/verify")
 def otp_verify():
     d = request.get_json(silent=True) or {}
-    ev = event_by_code(d.get("code"))
+    ev = event_for(d.get("code"))
     email = str(d.get("email") or "").strip().lower()
     otp = str(d.get("otp") or "").strip()
     if not ev:
@@ -316,12 +352,23 @@ def otp_verify():
 def _state(s):
     c = con()
     ev = c.execute("SELECT * FROM events WHERE id=?", (s["event_id"],)).fetchone()
-    photos = []
+    photos, groups = [], []
     if s["status"] in ("matched", "approved"):
-        photos = [r["photo_id"] for r in c.execute(
-            "SELECT photo_id FROM matches WHERE session_id=? ORDER BY score DESC", (s["id"],))]
-    return dict(ok=True, email=s["email"], status=s["status"], photos=photos,
-                event_code=ev["code"] if ev else None,
+        by_event = {}
+        for r in c.execute(
+                "SELECT m.photo_id, e.id AS eid, e.name, e.event_date FROM matches m "
+                "JOIN photos p ON p.id=m.photo_id JOIN events e ON e.id=p.event_id "
+                "WHERE m.session_id=? ORDER BY e.event_date DESC, e.id DESC, m.score DESC",
+                (s["id"],)):
+            grp = by_event.get(r["eid"])
+            if grp is None:
+                grp = by_event[r["eid"]] = dict(name=r["name"], date=r["event_date"], photos=[])
+                groups.append(grp)
+            grp["photos"].append(r["photo_id"])
+            photos.append(r["photo_id"])
+    return dict(ok=True, email=s["email"], status=s["status"], photos=photos, groups=groups,
+                event_code=ev["code"] if ev else ("" if s["event_id"] == 0 else None),
+                date_from=s["date_from"], date_to=s["date_to"],
                 tries_left=max(0, config.SELFIE_MAX_TRIES - s["selfie_tries"]))
 
 
@@ -339,9 +386,24 @@ def selfie():
     if not s:
         return err("Please verify your email first.", 401)
     c = con()
-    ev = c.execute("SELECT * FROM events WHERE id=? AND active=1", (s["event_id"],)).fetchone()
-    if not ev:
-        return err("This event is closed.", 404)
+    d = request.get_json(silent=True) or {}
+    date_from = date_to = ""
+    if s["event_id"] == 0:                  # general link: every open album in the dates
+        date_from, date_to = str(d.get("date_from") or ""), str(d.get("date_to") or "")
+        if not (DATE_RE.fullmatch(date_from) and DATE_RE.fullmatch(date_to)) or date_from > date_to:
+            return err("Please choose the dates of your event (from - to).")
+        albums = c.execute(
+            "SELECT * FROM events WHERE active=1 AND event_date<>'' AND event_date BETWEEN ? AND ? "
+            "ORDER BY event_date DESC", (date_from, date_to)).fetchall() if config.PORTAL else []
+        if not albums:
+            return err("There is no album for these dates. Please check the dates, "
+                       "or ask the photographer.", 404)
+    else:
+        albums = c.execute("SELECT * FROM events WHERE id=? AND active=1",
+                           (s["event_id"],)).fetchall()
+        if not albums:
+            return err("This event is closed.", 404)
+    log_event = s["event_id"] or None
     if s["selfie_tries"] >= config.SELFIE_MAX_TRIES:
         # start over cleanly instead of leaving the guest stuck on this step
         c.execute("DELETE FROM matches WHERE session_id=?", (s["id"],))
@@ -350,7 +412,6 @@ def selfie():
         r = jsonify(ok=False, error="Too many selfies. Please enter your email again to continue.")
         r.delete_cookie(COOKIE)
         return r, 401
-    d = request.get_json(silent=True) or {}
     try:
         raw = base64.b64decode(str(d.get("image", "")).split(",", 1)[-1], validate=True)
     except Exception:
@@ -365,22 +426,29 @@ def selfie():
         return err("We could not see a face. Use good light and face the camera.")
     if len(vecs) > 1:
         return err("More than one face found. Please take the selfie alone.")
-    n_faces, best = indexer.stats(c, ev["id"], vecs[0])
+    n_faces, best, found, ask_first = 0, 0.0, [], False
+    for ev in albums:
+        n, top = indexer.stats(c, ev["id"], vecs[0])
+        n_faces, best = n_faces + n, max(best, top)
+        hits = indexer.search(c, ev["id"], vecs[0])
+        found += hits
+        ask_first = ask_first or bool(hits and ev["require_approval"])
     if not n_faces:
-        db.audit(c, "selfie_no_album_photos", s["email"], ev["id"],
+        db.audit(c, "selfie_no_album_photos", s["email"], log_event,
                  "the album has no scanned faces yet", ip())
         c.commit()
         return err("This album has no scanned photos yet. Please ask the photographer "
                    "to finish the scan and try again.", 409)
-    found = indexer.search(c, ev["id"], vecs[0])
-    status = "pending" if (ev["require_approval"] and found) else "matched"
+    status = "pending" if ask_first else "matched"
     c.execute("DELETE FROM matches WHERE session_id=?", (s["id"],))
     c.executemany("INSERT INTO matches(session_id,photo_id,score) VALUES(?,?,?)",
                   [(s["id"], pid, sc) for pid, sc in found])
-    c.execute("UPDATE sessions SET status=? WHERE id=?", (status, s["id"]))
-    db.audit(c, "selfie_matched", s["email"], ev["id"],
+    c.execute("UPDATE sessions SET status=?, date_from=?, date_to=? WHERE id=?",
+              (status, date_from, date_to, s["id"]))
+    db.audit(c, "selfie_matched", s["email"], log_event,
              f"{len(found)} photos | best score {best:.2f} (needs {config.MATCH_THRESHOLD:.2f}) "
-             f"| album has {n_faces} faces", ip())
+             f"| album has {n_faces} faces"
+             + (f" | {len(albums)} albums, {date_from} to {date_to}" if not log_event else ""), ip())
     c.commit()
     pend = config.SELFIE_DIR / f"{s['id']}.jpg"
     if status == "pending":      # kept only until you approve / reject
@@ -439,6 +507,10 @@ def download(token):
                 if r["root"] not in db.split_folders(r["folders"]):
                     continue
                 name = Path(r["relpath"]).name
+                if gdrive.is_drive(r["root"]) and old_copy(r):
+                    n += 1
+                    z.write(old_copy(r), f"{n:04d}_{name}")
+                    continue
                 if gdrive.is_drive(r["root"]):       # straight from Drive into the zip
                     try:
                         src = gdrive.open_original(r["ref"])
@@ -471,8 +543,10 @@ def download(token):
         abort(404)
     db.audit(c, "download", s["email"], s["event_id"], row["relpath"], ip())
     c.commit()
-    if gdrive.is_drive(row["root"]):
+    if gdrive.is_drive(row["root"]) and row["ref"]:
         return drive_download(row["ref"], Path(row["relpath"]).name)
+    if old_copy(row):
+        return send_file(old_copy(row), as_attachment=True, download_name=Path(row["relpath"]).name)
     p = real_path(row["folders"], row["root"], row["relpath"])
     return send_file(p, as_attachment=True, download_name=p.name)
 
@@ -553,13 +627,16 @@ def admin():
         e["link"] = guest_link(e["code"])
         events.append(e)
     pending = c.execute(
-        "SELECT s.id, s.email, s.created_at, e.name, "
+        "SELECT s.id, s.email, s.created_at, s.date_from, s.date_to, "
+        "COALESCE(e.name, 'General link') AS name, "
         "(SELECT COUNT(*) FROM matches m WHERE m.session_id=s.id) AS n "
-        "FROM sessions s JOIN events e ON e.id=s.event_id "
+        "FROM sessions s LEFT JOIN events e ON e.id=s.event_id "
         "WHERE s.status='pending' AND s.expires_at>? ORDER BY s.id", (time.time(),)).fetchall()
     log = c.execute("SELECT * FROM audit ORDER BY id DESC LIMIT 150").fetchall()
     return render_template("admin.html", brand=config.BRAND, events=events, pending=pending,
-                           log=log, csrf=session["csrf"], drive_email=gdrive.robot_email(), msg=request.args.get("msg", ""),
+                           log=log, csrf=session["csrf"],
+                           portal_link=guest_link("") if config.PORTAL else "",
+                           today=time.strftime("%Y-%m-%d"), drive_email=gdrive.robot_email(), msg=request.args.get("msg", ""),
                            fmt=lambda t: time.strftime("%d %b %H:%M", time.localtime(t)))
 
 
@@ -590,13 +667,19 @@ def status_text(eid, photos, faces):
                                        else f"{max(1, round(left))} minutes") + " left")
         if done:
             text += ". Photos already scanned can be found now."
-        return text, "running"
+        return (text + " " + indexer.timing(p)).strip(), "running"
     if p.get("state") == "failed":
         return "Scan failed. " + err_text, "failed"
     if not photos:
         return "No photos scanned yet. " + err_text, "empty"
     note = f" Note: {err_text}" if err_text else ""
-    return f"Ready - {photos} photos, {faces} faces found.{note}", "ready"
+    last = ""
+    if p.get("state") == "finished" and p.get("scanned"):
+        mins = p.get("took", 0) / 60
+        last = (f" Last scan: {p['scanned']} photos in "
+                + (f"{mins:.0f} minutes" if mins >= 2 else f"{p.get('took', 0):.0f} seconds")
+                + f". {indexer.timing(p)}")
+    return f"Ready - {photos} photos, {faces} faces found.{last}{note}", "ready"
 
 
 @app.get("/admin/status")
@@ -654,10 +737,13 @@ def admin_event_create():
     if not name or not folders or bad:
         return redirect(url_for("admin", msg="Not created. " + (" | ".join(bad) or "Type a name and add a folder or link.")))
     c = con()
+    date = request.form.get("event_date", "").strip()
     eid = c.execute(
-        "INSERT INTO events(name,code,folders,require_approval,created_at) VALUES(?,?,?,?,?)",
+        "INSERT INTO events(name,code,folders,require_approval,created_at,event_date) "
+        "VALUES(?,?,?,?,?,?)",
         (name, secrets.token_urlsafe(9), "\n".join(folders),
-         1 if request.form.get("approval") else 0, time.time())).lastrowid
+         1 if request.form.get("approval") else 0, time.time(),
+         date if DATE_RE.fullmatch(date) else "")).lastrowid
     c.commit()
     indexer.start_index(eid)
     return redirect(url_for("admin", msg="Album created. The photos are being scanned now."))
@@ -738,6 +824,14 @@ def admin_event_action(eid, action):
             c.commit()
             indexer.start_index(eid)
             msg = "Folders saved. Scanning the photos now."
+    elif action == "date":
+        date = request.form.get("event_date", "").strip()
+        if date and not DATE_RE.fullmatch(date):
+            msg = "Not saved. Choose the date from the calendar."
+        else:
+            c.execute("UPDATE events SET event_date=? WHERE id=?", (date, eid))
+            msg = ("Event date saved." if date else
+                   "Date removed - this album is now only reachable by its own link.")
     elif action == "toggle":
         c.execute("UPDATE events SET active=1-active WHERE id=?", (eid,))
     elif action == "approval":
@@ -772,7 +866,7 @@ def _test_message(eid, img):
     return msg
 
 
-def _test_photos(eid, img, limit=60):
+def _test_photos(eid, img, limit=24):
     """The photos a guest with this face would get (best first)."""
     try:
         vecs = faces.get_engine().embed(img)
@@ -796,7 +890,13 @@ def admin_photo(pid):
         (pid,)).fetchone()
     if not row:
         abort(404)
-    return send_file(preview_file(row), mimetype="image/jpeg")
+    from werkzeug.exceptions import HTTPException
+    try:
+        return send_file(preview_file(row), mimetype="image/jpeg")
+    except HTTPException as e:              # tell the admin why, not just a broken picture
+        return f"{row['relpath']}: {g.get('why') or 'not available'}", e.code
+    except Exception as e:
+        return f"{row['relpath']}: {e}", 500
 
 
 @app.post("/admin/events/<int:eid>/test-selfie")

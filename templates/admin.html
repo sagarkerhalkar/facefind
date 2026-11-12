@@ -13,7 +13,7 @@
 <tr><th>Their selfie</th><th>Email</th><th>Album</th><th>Photos found</th><th></th></tr>
 {% for p in pending %}<tr>
 <td><img class="selfie" src="{{ url_for('admin_selfie', sid=p.id) }}" alt="Selfie sent by {{ p.email }}"></td>
-<td>{{ p.email }}</td><td>{{ p.name }}</td><td>{{ p.n }}</td>
+<td>{{ p.email }}</td><td>{{ p.name }}{% if p.date_from %} ({{ p.date_from }} to {{ p.date_to }}){% endif %}</td><td>{{ p.n }}</td>
 <td><form class="inline" method="post" action="{{ url_for('admin_request', sid=p.id, action='approve') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small">Give photos</button></form>
 <form class="inline" method="post" action="{{ url_for('admin_request', sid=p.id, action='reject') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small danger">Refuse</button></form></td>
 </tr>{% endfor %}</table></div>
@@ -24,6 +24,9 @@
 <input type="hidden" name="csrf" value="{{ csrf }}">
 <label for="name">Album name (guests see this)</label>
 <input id="name" name="name" type="text" required placeholder="Sharma wedding">
+<label for="event_date">Date of the event</label>
+<input id="event_date" name="event_date" type="date" value="{{ today }}">
+<p class="hint">Guests who use the general link choose their dates; this album is searched when its date is inside them.</p>
 <label for="folders">Where are the photos?</label>
 <p class="hint"><b>Option A:</b> paste a Google Drive folder link in the box below (one link per line). The photos are scanned on Drive itself - nothing is copied to this computer.<br>
 <b>Option B:</b> press <b>Choose folder</b> and pick a folder on this computer or on any connected drive. You can mix both.<br>
@@ -66,9 +69,18 @@ For photos that are on Google Drive, use the link (Option A), not the <code>G:</
 </div>
 
 <h2>Step 2 - Share the link with guests</h2>
+{% if portal_link %}
+<div class="card wide">
+  <div class="bar"><h1>One link for all events</h1><span class="pill">General link</span></div>
+  <label for="plink">Send this single link to everyone</label>
+  <div class="linkrow"><input id="plink" type="text" readonly value="{{ portal_link }}">
+    <button type="button" class="copy nomargin" data-target="plink">Copy link</button></div>
+  <p class="hint">The guest signs in once with email and code, chooses the dates of the events they attended, takes one selfie, and gets their photos from every open album whose date is inside those dates. Albums without a date are not included. If any of those albums has "Ask me first" ON, you approve the request first.</p>
+</div>
+{% endif %}
 {% for e in events %}
 <div class="card wide event">
-  <div class="bar"><h1>{{ e.name }}</h1>
+  <div class="bar"><h1>{{ e.name }}{% if e.event_date %} <span class="evname">{{ e.event_date }}</span>{% endif %}</h1>
     <span class="pill {{ 'on' if e.active else 'off' }}">{{ "Link is open" if e.active else "Link is closed" }}</span></div>
   <p class="status {{ e.state }}" data-eid="{{ e.id }}" data-state="{{ e.state }}">{{ e.status }}</p>
   <label for="link{{ e.id }}">Guest link - send this on WhatsApp or email</label>
@@ -88,6 +100,10 @@ For photos that are on Google Drive, use the link (Option A), not the <code>G:</
   <input id="tp{{ e.id }}" class="t-file" type="file" accept="image/*">
   <p class="status t-result" role="status" hidden></p>
   <div class="grid t-grid"></div></details>
+  <details><summary>Change the event date{% if not e.event_date %} (no date yet - not in the general link){% endif %}</summary>
+  <form method="post" action="{{ url_for('admin_event_action', eid=e.id, action='date') }}"><input type="hidden" name="csrf" value="{{ csrf }}">
+  <label for="dt{{ e.id }}">Date of the event</label>
+  <input id="dt{{ e.id }}" name="event_date" type="date" value="{{ e.event_date }}"><button class="small">Save date</button></form></details>
   <details><summary>Add or change folders</summary>
   <form method="post" action="{{ url_for('admin_event_action', eid=e.id, action='folders') }}"><input type="hidden" name="csrf" value="{{ csrf }}">
   <label for="fl{{ e.id }}">Folders, one per line</label>

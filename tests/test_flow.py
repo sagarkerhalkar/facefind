@@ -269,6 +269,51 @@ assert lim.post("/api/selfie", json={"image": img(RED)}, headers=H).status_code 
 code = keep2
 print("ok  selfie limit sends the guest back to the email step")
 
+# one general link: sign in once, choose the dates, get photos from every album in those dates
+pa, pb, pc = tmp / "pa", tmp / "pb", tmp / "pc"
+for d_ in (pa, pb, pc): d_.mkdir()
+img(RED, pa / "r.png"); img(BLUE, pa / "b.png"); img(RED, pb / "r.png"); img(RED, pc / "r.png")
+pid_of = {}
+for nm, fd, dt in (("Haldi", pa, "2026-11-01"), ("Wedding", pb, "2026-11-10"), ("Old", pc, "2026-10-01")):
+    adm.post("/admin/events", data={"name": nm, "csrf": csrf, "folders": str(fd), "event_date": dt})
+    pid_of[nm] = con.execute("SELECT id FROM events WHERE name=?", (nm,)).fetchone()[0]; wait(pid_of[nm])
+home = A.app.test_client().get("/"); assert home.status_code == 200 and b'data-portal="1"' in home.data
+assert "One link for all events" in adm.get("/admin").data.decode()
+con.execute("DELETE FROM otps"); con.commit(); sent.clear()
+keep3 = code; code = ""; pg = A.app.test_client(); login(pg, "p@x.com")
+def find(frm, to, color=RED):
+    return pg.post("/api/selfie", json={"image": img(color), "date_from": frm, "date_to": to}, headers=H)
+assert find("", "").status_code == 400 and find("2026-11-30", "2026-11-01").status_code == 400
+assert find("2025-01-01", "2025-12-31").status_code == 404          # no album in these dates
+r = find("2026-11-01", "2026-11-30").json
+assert r["status"] == "matched" and len(r["photos"]) == 2 and [x["name"] for x in r["groups"]] == ["Wedding", "Haldi"], r
+assert r["event_code"] == "" and r["date_from"] == "2026-11-01"
+assert len(find("2026-10-01", "2026-11-30").json["photos"]) == 3    # wider dates -> one more album
+blue_h = con.execute("SELECT id FROM photos WHERE event_id=? AND relpath='b.png'", (pid_of["Haldi"],)).fetchone()[0]
+assert pg.get(f"/api/preview/{blue_h}").status_code == 404          # still only the guest's own face
+z3 = pg.get(pg.post("/api/download-link/all", json={}, headers=H).json["url"])
+assert len(zipfile.ZipFile(io.BytesIO(z3.data)).namelist()) == 3
+adm.post(f"/admin/events/{pid_of['Old']}/date", data={"csrf": csrf, "event_date": ""})   # no date -> not in the general link
+assert len(find("2026-10-01", "2026-11-30").json["photos"]) == 2
+adm.post(f"/admin/events/{pid_of['Wedding']}/approval", data={"csrf": csrf})            # one album asks first
+r = find("2026-11-01", "2026-11-30").json; assert r["status"] == "pending" and r["photos"] == [], r
+psid = con.execute("SELECT id FROM sessions WHERE email='p@x.com'").fetchone()[0]
+assert "General link (2026-11-01 to 2026-11-30)" in adm.get("/admin").data.decode()
+adm.post(f"/admin/requests/{psid}/approve", data={"csrf": csrf})
+assert len(pg.get("/api/me").json["photos"]) == 2
+config.PORTAL = False
+assert A.app.test_client().get("/").status_code == 404
+assert pg.post("/api/otp/send", json={"code": "", "email": "q@x.com", "consent": True}, headers=H).status_code == 404
+assert find("2026-11-01", "2026-11-30").status_code == 404
+config.PORTAL = True; code = keep3
+# the scan says where its time goes, and a missing photo says why
+stt = adm.get("/admin/status").json[str(pid_of["Haldi"])]["text"]
+assert "Last scan: 2 photos" in stt and "to read it" in stt and "to find the faces" in stt, stt
+(pa / "r.png").unlink(); gone = con.execute("SELECT id FROM photos WHERE event_id=? AND relpath='r.png'", (pid_of["Haldi"],)).fetchone()[0]
+for f in config.CACHE_DIR.glob(f"{gone}-*.jpg"): f.unlink()
+why = adm.get(f"/admin/photo/{gone}"); assert why.status_code == 404 and "file not found" in why.get_data(as_text=True), why.data
+print("ok  general link: one sign-in, date range over several albums, approval, own photos only; scan timing; missing-photo reason")
+
 # LAN / VLAN rules
 import netutil
 config.ALLOWED_NETWORKS = netutil.parse_networks("192.168.10.0/24, 192.168.20.0/24")
