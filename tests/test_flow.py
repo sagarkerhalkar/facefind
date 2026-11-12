@@ -151,15 +151,6 @@ adm.post(f"/admin/events/{ev['id']}/toggle", data={"csrf": csrf})
 assert A.app.test_client().get("/e/" + code).status_code == 404
 hd = adm.get("/admin").headers
 assert "frame-ancestors 'none'" in hd["Content-Security-Policy"] and hd["Cache-Control"] == "no-store"
-# selfie limit: the guest is sent back to the email step, not left stuck
-con.execute("DELETE FROM otps"); con.commit(); sent.clear()
-lim = A.app.test_client(); login(lim, "lim@x.com")
-con.execute("UPDATE sessions SET selfie_tries=? WHERE email='lim@x.com'", (config.SELFIE_MAX_TRIES,)); con.commit()
-assert lim.post("/api/selfie", json={"image": img(RED)}, headers=H).status_code == 401
-assert lim.get("/api/me").status_code == 401
-con.execute("DELETE FROM otps"); con.commit(); login(lim, "lim@x.com")
-assert lim.post("/api/selfie", json={"image": img(RED)}, headers=H).status_code == 200
-
 # an album without scanned photos says so instead of "0 photos"
 empty = tmp / "empty"; empty.mkdir()
 adm.post("/admin/events", data={"name": "Empty", "csrf": csrf, "folders": str(empty)})
@@ -220,6 +211,17 @@ tree[FID].pop(0); indexer.index_event(dev["id"])                 # photo deleted
 assert con.execute("SELECT COUNT(*) FROM photos WHERE event_id=?", (dev["id"],)).fetchone()[0] == 1
 code = code_keep
 print("ok  Google Drive link: key upload, share check, sync, match, download, deletion")
+
+# selfie limit: the guest is sent back to the email step, not left stuck
+con.execute("DELETE FROM otps"); con.commit(); sent.clear()
+keep2 = code; code = dev["code"]; lim = A.app.test_client(); login(lim, "lim@x.com")
+con.execute("UPDATE sessions SET selfie_tries=? WHERE email='lim@x.com'", (config.SELFIE_MAX_TRIES,)); con.commit()
+assert lim.post("/api/selfie", json={"image": img(RED)}, headers=H).status_code == 401
+assert lim.get("/api/me").status_code == 401
+con.execute("DELETE FROM otps"); con.commit(); login(lim, "lim@x.com")
+assert lim.post("/api/selfie", json={"image": img(RED)}, headers=H).status_code == 200
+code = keep2
+print("ok  selfie limit sends the guest back to the email step")
 
 # LAN / VLAN rules
 import netutil
