@@ -45,8 +45,18 @@ def main():
     print("  mail id :", config.SMTP_USER or "(none)")
     print("  password:", f"{len(config.SMTP_PASSWORD)} characters" if config.SMTP_PASSWORD else "(none)")
     print("  test mode (DEV_MODE):", "ON" if config.DEV_MODE else "off")
+    if config.BREVO_API_KEY:
+        import mailer
+        print("  sending through Brevo as", config.MAIL_FROM)
+        try:
+            mailer.send_brevo(config.BREVO_API_KEY, config.MAIL_FROM, config.MAIL_FROM,
+                              f"{config.BRAND}: test mail works", "OTP mails will be delivered too.")
+            print(f"\nWORKS. A test mail was sent to {config.MAIL_FROM} - check the inbox (and Spam).")
+        except Exception as e:
+            print(f"\nFAILED: {e}\nRun mail.bat and enter the Brevo details again.")
+        return
     if not config.SMTP_HOST or not config.SMTP_USER or not config.SMTP_PASSWORD:
-        print("\nMail is NOT set up. Run setup.bat and choose 1 (Gmail) at the mail question.")
+        print("\nMail is NOT set up. Run mail.bat")
         return
     if "gmail" in config.SMTP_HOST and len(config.SMTP_PASSWORD) != 16:
         print("\nNote: a Gmail app password has exactly 16 letters. Yours has "
@@ -71,10 +81,10 @@ def main():
     print("\nMail does not work yet.")
     if any(r.startswith("LOGIN REFUSED") for r in results.values()):
         print("Google/your mail server refused the mail id or password. Create a NEW app")
-        print("password, then run setup.bat and paste it at the mail question.")
+        print("password and run mail.bat, or run mail.bat and choose Brevo (4).")
     else:
-        print("Your network, firewall or antivirus is blocking outgoing mail. Try once on a")
-        print("mobile hotspot, or switch off the antivirus 'mail shield' and run this again.")
+        print("Your network, firewall or antivirus is blocking the mail ports.")
+        print("Easy way: run mail.bat and choose Brevo (4) - it does not use those ports.")
     print("Copy the text above and send it to the developer if it is not clear.")
 
 

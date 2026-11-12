@@ -52,51 +52,101 @@ def ask_password():
 
 
 def test_mail(host, port, user, password):
-    try:
-        ctx = ssl.create_default_context()
-        with smtplib.SMTP(host, port, timeout=20) as s:
-            s.starttls(context=ctx)
-            s.login(user, password)
-        return ""
-    except smtplib.SMTPAuthenticationError:
-        return "The mail id or app password was not accepted."
-    except Exception as e:
-        return f"Could not reach the mail server ({e})."
+    """Tries the login on the given port, then on the other usual one.
+    Returns (problem, port): problem is '' when a port worked."""
+    problem = ""
+    for p in [port] + [x for x in (587, 465) if x != port]:
+        try:
+            ctx = ssl.create_default_context()
+            if p == 465:
+                s = smtplib.SMTP_SSL(host, 465, context=ctx, timeout=20)
+            else:
+                s = smtplib.SMTP(host, p, timeout=20)
+                s.starttls(context=ctx)
+            with s:
+                s.login(user, password)
+            return "", p
+        except smtplib.SMTPAuthenticationError:
+            return "The mail id or app password was not accepted.", port
+        except Exception as e:
+            problem = (f"The network closed the connection to the mail server ({e}). "
+                       "Your firewall or antivirus blocks mail ports - choose Brevo (4) instead.")
+    return problem, port
+
+
+NO_MAIL = dict(SMTP_HOST="", SMTP_PORT="587", SMTP_USER="", SMTP_PASSWORD="",
+               MAIL_FROM="", BREVO_API_KEY="", DEV_MODE="0")
+
+
+def ask_brevo():
+    print("\n  Brevo is a free mail service (300 mails a day). It works on office")
+    print("  networks that block mail ports. Guests see the mail coming from YOUR mail id.")
+    print("  1. Sign up free at https://www.brevo.com")
+    print("  2. Menu (top right) > Senders, Domains > Senders > Add sender:")
+    print("     add your mail id and click the link Brevo sends to it.")
+    print("  3. Menu > SMTP & API > API keys > Generate a new API key. Copy it.\n")
+    import config
+    import mailer
+    while True:
+        sender = ask("Your mail id (the sender you added in Brevo)")
+        key = input("Brevo API key (starts with xkeysib-): ").strip()
+        if not sender or not key:
+            continue
+        print("  Sending a test mail to you ...")
+        try:
+            mailer.send_brevo(key, sender, sender, f"{config.BRAND}: test mail works",
+                              "If you can read this, OTP mails will be delivered too.")
+            print(f"  Sent. Check the inbox of {sender} (and Spam).")
+            break
+        except Exception as e:
+            print(f"  It did not work: {e}")
+            if not ask_yes("Type the details again?"):
+                print("  Saved anyway - OTP mails will fail until this is corrected.")
+                break
+    return dict(NO_MAIL, MAIL_FROM=sender, BREVO_API_KEY=key)
 
 
 def ask_mail():
-    kind = ask_choice("Which mail id will send the OTP codes?", [
-        "Gmail or Google Workspace",
+    kind = ask_choice("How should the OTP mails be sent?", [
+        "Gmail or Google Workspace (needs a 16-letter app password)",
         "Outlook / Office 365",
         "Another mail server",
+        "Brevo - free, works when the office network blocks mail (recommended if 1 fails)",
         "Set up mail later (testing only - the code is shown in this window)",
     ])
+    if kind == 5:
+        return dict(NO_MAIL, DEV_MODE="1")
     if kind == 4:
-        return dict(SMTP_HOST="", SMTP_PORT="587", SMTP_USER="", SMTP_PASSWORD="",
-                    MAIL_FROM="", DEV_MODE="1")
+        return ask_brevo()
     host = {1: "smtp.gmail.com", 2: "smtp.office365.com"}.get(kind) or ask("Mail server (SMTP host)")
     port = "587" if kind != 3 else ask("Mail server port", "587")
     if kind == 1:
-        print("\n  Gmail needs an APP PASSWORD, not your normal password:")
-        print("  1. Open https://myaccount.google.com/apppasswords")
+        print("\n  Gmail needs an APP PASSWORD (16 letters), not your normal password:")
+        print("  1. Sign in to the SAME mail id you will type below")
+        print("  2. Open https://myaccount.google.com/apppasswords")
         print("     (2-Step Verification must be on)")
-        print("  2. Create one named FaceFind and copy the 16 letters.\n")
+        print("  3. Create one named FaceFind and copy the 16 letters.\n")
     while True:
         user = ask("Mail id (e.g. you@gmail.com)")
         password = input("App password / mail password: ").replace(" ", "")
         if not user or not password:
             continue
+        if kind == 1 and len(password) != 16:
+            print(f"  That has {len(password)} characters. A Gmail app password has exactly 16 letters.")
+            if ask_yes("Type it again?"):
+                continue
         print("  Checking the mail login ...")
-        problem = test_mail(host, int(port), user, password)
+        problem, good_port = test_mail(host, int(port), user, password)
         if not problem:
+            port = str(good_port)
             print("  Mail login works.")
             break
         print("  " + problem)
         if not ask_yes("Type the mail details again?"):
             print("  Saved anyway - OTP mails will fail until this is corrected.")
             break
-    return dict(SMTP_HOST=host, SMTP_PORT=port, SMTP_USER=user, SMTP_PASSWORD=password,
-                MAIL_FROM=user, DEV_MODE="0")
+    return dict(NO_MAIL, SMTP_HOST=host, SMTP_PORT=port, SMTP_USER=user,
+                SMTP_PASSWORD=password, MAIL_FROM=user)
 
 
 def ask_port():
