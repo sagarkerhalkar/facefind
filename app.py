@@ -293,7 +293,13 @@ def selfie():
     if not ev:
         return err("This event is closed.", 404)
     if s["selfie_tries"] >= config.SELFIE_MAX_TRIES:
-        return err("Selfie limit reached. Please verify your email again later.", 429)
+        # start over cleanly instead of leaving the guest stuck on this step
+        c.execute("DELETE FROM matches WHERE session_id=?", (s["id"],))
+        c.execute("DELETE FROM sessions WHERE id=?", (s["id"],))
+        c.commit()
+        r = jsonify(ok=False, error="Too many selfies. Please enter your email again to continue.")
+        r.delete_cookie(COOKIE)
+        return r, 401
     d = request.get_json(silent=True) or {}
     try:
         raw = base64.b64decode(str(d.get("image", "")).split(",", 1)[-1], validate=True)

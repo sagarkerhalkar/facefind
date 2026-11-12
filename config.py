@@ -86,7 +86,7 @@ OTP_MAX_ATTEMPTS = 5
 OTP_PER_EMAIL = 3          # sends per 15 minutes
 OTP_PER_IP = 10            # sends per 15 minutes
 SESSION_TTL = int(os.environ.get("SESSION_HOURS", "2")) * 3600
-SELFIE_MAX_TRIES = 5       # per verified session
+SELFIE_MAX_TRIES = 30      # per verified session; after that the email is verified again
 DOWNLOAD_LINK_TTL = 120    # seconds
 # 0.363 is the value the face model's authors publish for "same person".
 # (0.40 was this app's first default and proved too strict for selfies.)
