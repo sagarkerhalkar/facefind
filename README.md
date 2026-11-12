@@ -7,9 +7,11 @@ Nobody else can open or download them.
 ## Start it (Windows)
 
 1. Install Python 3.11 or newer from python.org (tick **Add Python to PATH**).
-2. Double-click **start.bat**. The first run installs what is needed, downloads
-   the face models (about 40 MB), and opens the `.env` settings file.
-3. Fill in `.env` (see below), save, and double-click **start.bat** again.
+2. Double-click **start.bat**. The first run installs what is needed and
+   downloads the face models (about 40 MB).
+3. Answer the setup questions in the window: studio name, admin password
+   (6 characters or more), the mail id that sends the OTP, and the port.
+   To change the answers later run `setup.bat`.
 4. The window prints the addresses, for example
    `https://192.168.1.50:8443/admin`. Open it and sign in with your admin
    password.
@@ -17,6 +19,8 @@ Nobody else can open or download them.
 On Mac or Linux use `./start.sh` instead.
 
 ## The `.env` settings
+
+The setup questions write this file for you; you can also edit it by hand.
 
 | Setting | What to put |
 |---|---|

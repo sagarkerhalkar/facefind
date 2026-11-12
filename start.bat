@@ -14,6 +14,12 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-if not exist .env ( copy .env.example .env & echo. & echo Fill in the .env file, then run start.bat again. & notepad .env & exit /b )
+if not exist .env (
+  python setup.py
+  if errorlevel 1 (
+    pause
+    exit /b 1
+  )
+)
 python app.py
 pause

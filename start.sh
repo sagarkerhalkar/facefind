@@ -4,5 +4,5 @@ cd "$(dirname "$0")" || exit 1
 . .venv/bin/activate
 pip install -q -r requirements.txt
 python download_models.py || exit 1
-if [ ! -f .env ]; then cp .env.example .env; echo "Fill in the .env file, then run ./start.sh again."; exit 0; fi
+[ -f .env ] || python setup.py || exit 1
 python app.py
