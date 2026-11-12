@@ -41,9 +41,11 @@
 
   <section class="card" id="step-selfie" hidden>
     <h1>Take a selfie</h1>
-    <p>Face the camera alone, in good light.</p>
+    <p>Look straight at the camera, alone, in good light. Avoid glare on glasses.</p>
     <div class="cam"><video id="video" autoplay playsinline muted></video></div>
     <button id="snap" type="button">Take selfie and find my photos</button>
+    <label for="upload" class="or">Or upload a clear photo of your face</label>
+    <input id="upload" type="file" accept="image/*">
     <canvas id="canvas" hidden></canvas>
   </section>
 

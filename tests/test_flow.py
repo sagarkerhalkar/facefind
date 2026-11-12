@@ -100,6 +100,10 @@ for pid in others:
     assert g.post(f"/api/download-link/{pid}", json={}, headers=H).status_code == 404
 lg = con.execute("SELECT detail FROM audit WHERE action='selfie_matched' ORDER BY id DESC").fetchone()[0]
 assert "best score 1.00" in lg and "album has 5 faces" in lg, lg
+tr = adm.post(f"/admin/events/{ev['id']}/test", data={"csrf": csrf, "photo": (io.BytesIO(base64.b64decode(img(RED).split(",")[1])), "t.png")}, follow_redirects=True).data.decode()
+assert "album has 5 photos and 5 faces" in tr and "best score 1.00, 2 photos match" in tr, tr[:600]
+tb = adm.post(f"/admin/events/{ev['id']}/test", data={"csrf": csrf, "photo": (io.BytesIO(base64.b64decode(img(BLACK).split(",")[1])), "t.png")}, follow_redirects=True).data.decode()
+assert "no face was found" in tb
 print("ok  guest sees only own photos (from both drives), others are 404")
 
 pid = next(iter(mine))

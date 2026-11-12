@@ -670,6 +670,37 @@ def admin_event_action(eid, action):
     return redirect(url_for("admin", msg=msg))
 
 
+@app.post("/admin/events/<int:eid>/test")
+def admin_event_test(eid):
+    """Admin uploads any face photo and sees exactly how it matches the album."""
+    if not admin_post_ok():
+        abort(403)
+    up = request.files.get("photo")
+    img = faces.decode(up.read()) if up else None
+    if img is None:
+        return redirect(url_for("admin", msg="Test: that file is not a picture (use JPG or PNG)."))
+    try:
+        vecs = faces.get_engine().embed(img)
+    except Exception as e:
+        return redirect(url_for("admin", msg=f"Test: the face engine is not working: {e}"))
+    c = con()
+    n_photos = c.execute("SELECT COUNT(*) FROM photos WHERE event_id=?", (eid,)).fetchone()[0]
+    if not vecs:
+        return redirect(url_for("admin", msg="Test: no face was found in the test photo. "
+                                             "Use a clear, front-facing photo."))
+    lines, n_faces = [], 0
+    for i, v in enumerate(vecs, 1):
+        n_faces, best = indexer.stats(c, eid, v)
+        hits = len(indexer.search(c, eid, v))
+        lines.append(f"face {i}: best score {best:.2f}, {hits} photos match")
+    msg = (f"Test result - album has {n_photos} photos and {n_faces} faces. "
+           f"Test photo has {len(vecs)} face(s): " + "; ".join(lines) +
+           f". A score of {config.MATCH_THRESHOLD:.2f} or more counts as the same person.")
+    if not n_faces:
+        msg += " The album has NO scanned faces - press 'Scan again' and wait for green."
+    return redirect(url_for("admin", msg=msg))
+
+
 @app.post("/admin/requests/<int:sid>/<action>")
 def admin_request(sid, action):
     if not admin_post_ok() or action not in ("approve", "reject"):
@@ -708,7 +739,28 @@ def _open_browser(url):
     threading.Timer(2.0, lambda: webbrowser.open(url)).start()
 
 
+def startup_checks():
+    """Runs when the app starts: is the face engine alive, and does any album
+    still need its first scan (for example after a failed one)?"""
+    try:
+        faces.get_engine()
+        print("Face engine: OK")
+    except Exception as e:
+        print(f"\n!! Face engine is NOT working: {e}\n!! Close this window and run start.bat again.\n")
+        return
+    c = db.connect()
+    try:
+        for e in c.execute("SELECT id, name FROM events WHERE active=1").fetchall():
+            n = c.execute("SELECT COUNT(*) FROM photos WHERE event_id=?", (e["id"],)).fetchone()[0]
+            if not n:
+                print(f"Album '{e['name']}' has no scanned photos - scanning it now.")
+                indexer.start_index(e["id"])
+    finally:
+        c.close()
+
+
 def main():
+    startup_checks()
     host = config.HOST
     port = netutil.free_port(host, config.PORT)
     if port != config.PORT:

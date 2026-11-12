@@ -65,3 +65,5 @@ button.nomargin { margin-top:0; }
 .event h1 { margin:0; }
 .logbox { margin-top:28px; }
 textarea { margin-top:8px; }
+.or { text-align:center; color:var(--soft); font-weight:400; margin-top:18px; }
+input[type=file] { width:100%; padding:10px; border:1px dashed #aab4be; border-radius:8px; background:#fff; }

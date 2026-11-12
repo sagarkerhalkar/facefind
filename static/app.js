@@ -78,15 +78,15 @@
   function stopCam() {
     if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
   }
-  $("snap").addEventListener("click", async () => {
-    const v = $("video"), c = $("canvas");
-    if (!stream || !v.videoWidth) return say("Camera is not ready yet.");
-    const scale = Math.min(1, 1024 / Math.max(v.videoWidth, v.videoHeight));
-    c.width = Math.round(v.videoWidth * scale);
-    c.height = Math.round(v.videoHeight * scale);
-    c.getContext("2d").drawImage(v, 0, 0, c.width, c.height);
+  // draws a camera frame or an uploaded picture (max 1280 px) and sends it
+  async function sendFace(source, w, h) {
+    const c = $("canvas");
+    const scale = Math.min(1, 1280 / Math.max(w, h));
+    c.width = Math.round(w * scale);
+    c.height = Math.round(h * scale);
+    c.getContext("2d").drawImage(source, 0, 0, c.width, c.height);
     busy($("snap"), true); say("Looking for your photos...");
-    const r = await api("/api/selfie", { image: c.toDataURL("image/jpeg", 0.9) });
+    const r = await api("/api/selfie", { image: c.toDataURL("image/jpeg", 0.92) });
     busy($("snap"), false);
     if (!r.ok) {
       if (r.status_code === 401) return show("step-email", 1), say(r.error);
@@ -94,6 +94,20 @@
     }
     say("");
     render(r);
+  }
+  $("snap").addEventListener("click", () => {
+    const v = $("video");
+    if (!stream || !v.videoWidth) return say("Camera is not ready yet. You can upload a photo instead.");
+    sendFace(v, v.videoWidth, v.videoHeight);
+  });
+  $("upload").addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const img = new Image();
+    img.onload = () => { sendFace(img, img.naturalWidth, img.naturalHeight); URL.revokeObjectURL(img.src); };
+    img.onerror = () => say("That file is not a picture. Please choose a JPG or PNG photo.");
+    img.src = URL.createObjectURL(file);
+    e.target.value = "";
   });
 
   // ---- step 4: photos
