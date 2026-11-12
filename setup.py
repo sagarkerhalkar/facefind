@@ -190,8 +190,7 @@ def main():
     if ask_yes("Limit which networks / VLANs can open the app?", False):
         v["ALLOWED_NETWORKS"] = ask_networks("Networks allowed to open the app")
         v["ADMIN_NETWORKS"] = ask_networks("Networks allowed to open the ADMIN page")
-    v.update(PUBLIC_URL="", TLS_NAMES="", TRUST_PROXY="0", MATCH_THRESHOLD="0.40",
-             SESSION_HOURS="2")
+    v.update(PUBLIC_URL="", TLS_NAMES="", TRUST_PROXY="0", SESSION_HOURS="2")
     ENV.write_text("# Written by setup.py - run 'python setup.py' to change.\n" +
                    "".join(f"{k}={val}\n" for k, val in v.items()), encoding="utf-8")
     print("\nSaved. Starting the app ...")

@@ -145,3 +145,12 @@ def search(con, event_id, vec):
         if s > best.get(pid, -1):
             best[pid] = s
     return sorted(best.items(), key=lambda x: -x[1])[: config.MAX_RESULTS]
+
+
+def stats(con, event_id, vec):
+    """(faces in the album, best similarity for this selfie) - for the log,
+    so a 'no photos' result can be explained."""
+    m, ids = _matrix(con, event_id)
+    if not len(ids):
+        return 0, 0.0
+    return int(len(ids)), float((m @ vec).max())

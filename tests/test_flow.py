@@ -98,6 +98,8 @@ for pid in mine:
 for pid in others:
     assert g.get(f"/api/preview/{pid}").status_code == 404
     assert g.post(f"/api/download-link/{pid}", json={}, headers=H).status_code == 404
+lg = con.execute("SELECT detail FROM audit WHERE action='selfie_matched' ORDER BY id DESC").fetchone()[0]
+assert "best score 1.00" in lg and "album has 5 faces" in lg, lg
 print("ok  guest sees only own photos (from both drives), others are 404")
 
 pid = next(iter(mine))
@@ -149,6 +151,15 @@ adm.post(f"/admin/events/{ev['id']}/toggle", data={"csrf": csrf})
 assert A.app.test_client().get("/e/" + code).status_code == 404
 hd = adm.get("/admin").headers
 assert "frame-ancestors 'none'" in hd["Content-Security-Policy"] and hd["Cache-Control"] == "no-store"
+# an album without scanned photos says so instead of "0 photos"
+empty = tmp / "empty"; empty.mkdir()
+adm.post("/admin/events", data={"name": "Empty", "csrf": csrf, "folders": str(empty)})
+eev = con.execute("SELECT * FROM events WHERE name='Empty'").fetchone(); time.sleep(0.5)
+con.execute("DELETE FROM otps"); con.commit(); sent.clear()
+keep = code; code = eev["code"]; eg = A.app.test_client(); login(eg, "e@x.com")
+er = eg.post("/api/selfie", json={"image": img(RED)}, headers=H)
+assert er.status_code == 409 and "no scanned photos" in er.json["error"]; code = keep
+
 # Google Drive links (Google is replaced by a stand-in; photos: 1 red, 1 blue in a sub-folder)
 import gdrive, json as _json
 from cryptography.hazmat.primitives.asymmetric import rsa

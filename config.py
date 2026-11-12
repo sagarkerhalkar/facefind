@@ -88,7 +88,10 @@ OTP_PER_IP = 10            # sends per 15 minutes
 SESSION_TTL = int(os.environ.get("SESSION_HOURS", "2")) * 3600
 SELFIE_MAX_TRIES = 5       # per verified session
 DOWNLOAD_LINK_TTL = 120    # seconds
-MATCH_THRESHOLD = float(os.environ.get("MATCH_THRESHOLD", "0.40"))
+# 0.363 is the value the face model's authors publish for "same person".
+# (0.40 was this app's first default and proved too strict for selfies.)
+_thr = os.environ.get("MATCH_THRESHOLD", "").strip()
+MATCH_THRESHOLD = 0.363 if _thr in ("", "0.40") else float(_thr)
 MAX_RESULTS = 500
 PREVIEW_SIDE = 900
 IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}

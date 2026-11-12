@@ -309,13 +309,22 @@ def selfie():
         return err("We could not see a face. Use good light and face the camera.")
     if len(vecs) > 1:
         return err("More than one face found. Please take the selfie alone.")
+    n_faces, best = indexer.stats(c, ev["id"], vecs[0])
+    if not n_faces:
+        db.audit(c, "selfie_no_album_photos", s["email"], ev["id"],
+                 "the album has no scanned faces yet", ip())
+        c.commit()
+        return err("This album has no scanned photos yet. Please ask the photographer "
+                   "to finish the scan and try again.", 409)
     found = indexer.search(c, ev["id"], vecs[0])
     status = "pending" if (ev["require_approval"] and found) else "matched"
     c.execute("DELETE FROM matches WHERE session_id=?", (s["id"],))
     c.executemany("INSERT INTO matches(session_id,photo_id,score) VALUES(?,?,?)",
                   [(s["id"], pid, sc) for pid, sc in found])
     c.execute("UPDATE sessions SET status=? WHERE id=?", (status, s["id"]))
-    db.audit(c, "selfie_matched", s["email"], ev["id"], f"{len(found)} photos", ip())
+    db.audit(c, "selfie_matched", s["email"], ev["id"],
+             f"{len(found)} photos | best score {best:.2f} (needs {config.MATCH_THRESHOLD:.2f}) "
+             f"| album has {n_faces} faces", ip())
     c.commit()
     pend = config.SELFIE_DIR / f"{s['id']}.jpg"
     if status == "pending":      # kept only until you approve / reject

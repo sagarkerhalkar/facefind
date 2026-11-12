@@ -33,6 +33,10 @@ over many drives:
 | 13 | OTP mails are not sent | `testmail.bat` added. It showed (a) a normal password was entered instead of a 16-letter app password and (b) the network closes connections on the mail ports |
 | 14 | An easy way for mail | `mail.bat` added: changes only the mail settings and tests them at once. New option "Brevo" sends over normal HTTPS when the office network blocks mail ports |
 
+| 15 | Password "6 characters, not more" | Briefly set to exactly 6; the owner's own password had 8, so it was set back to "6 or more" |
+| 16 | What does "app password has exactly 16 letters" mean | Explained: Google needs a 16-letter code it generates itself, not the normal mail password |
+| 17 | Selfie returned "0 photos of you" although the owner's photos are in the album | Match strictness lowered from 0.40 to the model's published 0.363. Each selfie attempt now logs the best score and how many faces the album holds, and an unscanned album says so instead of "0 photos" |
+
 ## Files a user runs
 
 | File | Purpose |
