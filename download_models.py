@@ -15,8 +15,14 @@ for name, sub in FILES.items():
         print("already there:", name)
         continue
     print("downloading", name, "...")
-    urllib.request.urlretrieve(ZOO + sub + name, dest)
-    if dest.stat().st_size < 100_000:
-        dest.unlink()
-        raise SystemExit(f"Download of {name} failed - please try again.")
+    for attempt in range(1, 6):
+        try:
+            urllib.request.urlretrieve(ZOO + sub + name, dest)
+            if dest.stat().st_size > 100_000:
+                break
+        except Exception as e:
+            print(f"  attempt {attempt} failed: {e}")
+        dest.unlink(missing_ok=True)
+    else:
+        raise SystemExit(f"Download of {name} failed - check the internet and run again.")
 print("Models ready.")
