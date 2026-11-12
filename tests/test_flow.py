@@ -19,6 +19,7 @@ class Fake:
         v = rng.normal(size=128).astype(np.float32)
         return [v / np.linalg.norm(v)]
 faces.get_engine = lambda: Fake()
+faces.make_engine = lambda: Fake()
 sent = {}
 mailer.send_otp = lambda to, code, name: sent.__setitem__(to, code)
 
@@ -101,9 +102,23 @@ for pid in others:
 lg = con.execute("SELECT detail FROM audit WHERE action='selfie_matched' ORDER BY id DESC").fetchone()[0]
 assert "best score 1.00" in lg and "album has 5 faces" in lg, lg
 tr = adm.post(f"/admin/events/{ev['id']}/test", data={"csrf": csrf, "photo": (io.BytesIO(base64.b64decode(img(RED).split(",")[1])), "t.png")}, follow_redirects=True).data.decode()
-assert "album has 5 photos and 5 faces" in tr and "best score 1.00, 2 photos match" in tr, tr[:600]
+assert "Album has 5 photos and 5 faces" in tr and "best score 1.00, 2 photos match" in tr, tr[:600]
 tb = adm.post(f"/admin/events/{ev['id']}/test", data={"csrf": csrf, "photo": (io.BytesIO(base64.b64decode(img(BLACK).split(",")[1])), "t.png")}, follow_redirects=True).data.decode()
-assert "no face was found" in tb
+assert "No face was found" in tb
+ts = adm.post(f"/admin/events/{ev['id']}/test-selfie", json={"image": img(BLUE)}, headers={"X-CSRF": csrf}).json["text"]
+assert "best score 1.00, 3 photos match" in ts, ts
+assert adm.post(f"/admin/events/{ev['id']}/test-selfie", json={"image": img(BLUE)}).status_code == 403
+# a folder with only RAW / HEIC files explains itself
+rawd = tmp / "raw"; rawd.mkdir(); (rawd / "a.CR2").write_bytes(b"x"); (rawd / "b.heic").write_bytes(b"x")
+adm.post("/admin/events", data={"name": "Raw", "csrf": csrf, "folders": str(rawd)})
+rid = con.execute("SELECT id FROM events WHERE name='Raw'").fetchone()[0]
+for _ in range(50):
+    if indexer.progress.get(rid, {}).get("state") == "finished": break
+    time.sleep(0.1)
+rst = adm.get("/admin/status").json[str(rid)]["text"]
+assert "No JPG / PNG / WEBP photos were found" in rst and ".cr2" in rst, rst
+(rawd / "broken.jpg").write_bytes(b"not a jpeg"); indexer.index_event(rid)
+assert "1 files could not be read" in adm.get("/admin/status").json[str(rid)]["text"]
 print("ok  guest sees only own photos (from both drives), others are 404")
 
 pid = next(iter(mine))

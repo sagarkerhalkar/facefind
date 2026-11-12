@@ -512,7 +512,15 @@ def status_text(eid, photos, faces):
             return p["phase"], "running"
         if not p.get("total"):
             return "Getting ready - counting the photos ...", "running"
-        return f"Scanning ... {p['done']} of {p['total']} photos", "running"
+        text = f"Scanning ... {p['done']} of {p['total']} photos"
+        took = time.time() - p.get("started", 0)
+        if p.get("scanned", 0) >= 10 and took > 0:
+            rate = p["scanned"] / took
+            left = (p["total"] - p["done"]) / rate / 60
+            text += (f" ({rate:.1f} photos per second, about "
+                     + (f"{left / 60:.1f} hours" if left >= 90 else f"{max(1, round(left))} minutes")
+                     + " left). Photos already scanned can be found now.")
+        return text, "running"
     if p.get("state") == "failed":
         return "Scan failed. " + err_text, "failed"
     if not photos:
@@ -670,6 +678,46 @@ def admin_event_action(eid, action):
     return redirect(url_for("admin", msg=msg))
 
 
+def _test_message(eid, img):
+    """How a face picture matches an album, in plain words."""
+    try:
+        vecs = faces.get_engine().embed(img)
+    except Exception as e:
+        return f"The face engine is not working: {e}"
+    c = con()
+    n_photos = c.execute("SELECT COUNT(*) FROM photos WHERE event_id=?", (eid,)).fetchone()[0]
+    n_faces = c.execute("SELECT COUNT(*) FROM faces WHERE event_id=?", (eid,)).fetchone()[0]
+    if not vecs:
+        return "No face was found in the picture. Look straight at the camera in good light."
+    lines = []
+    for i, v in enumerate(vecs, 1):
+        _, best = indexer.stats(c, eid, v)
+        hits = len(indexer.search(c, eid, v))
+        lines.append(f"face {i}: best score {best:.2f}, {hits} photos match")
+    msg = (f"Album has {n_photos} photos and {n_faces} faces. "
+           f"The picture has {len(vecs)} face(s): " + "; ".join(lines) +
+           f". A score of {config.MATCH_THRESHOLD:.2f} or more counts as the same person.")
+    if not n_faces:
+        msg += " The album has NO scanned faces yet - look at its status line for the reason."
+    return msg
+
+
+@app.post("/admin/events/<int:eid>/test-selfie")
+def admin_event_test_selfie(eid):
+    """Admin takes a live selfie on the admin page, exactly like a guest."""
+    if not is_admin() or not hmac.compare_digest(
+            request.headers.get("X-CSRF", ""), session.get("csrf", "x")):
+        abort(403)
+    d = request.get_json(silent=True) or {}
+    try:
+        img = faces.decode(base64.b64decode(str(d.get("image", "")).split(",", 1)[-1]))
+    except Exception:
+        img = None
+    if img is None:
+        return jsonify(text="Could not read the picture.")
+    return jsonify(text=_test_message(eid, img))
+
+
 @app.post("/admin/events/<int:eid>/test")
 def admin_event_test(eid):
     """Admin uploads any face photo and sees exactly how it matches the album."""
@@ -679,26 +727,7 @@ def admin_event_test(eid):
     img = faces.decode(up.read()) if up else None
     if img is None:
         return redirect(url_for("admin", msg="Test: that file is not a picture (use JPG or PNG)."))
-    try:
-        vecs = faces.get_engine().embed(img)
-    except Exception as e:
-        return redirect(url_for("admin", msg=f"Test: the face engine is not working: {e}"))
-    c = con()
-    n_photos = c.execute("SELECT COUNT(*) FROM photos WHERE event_id=?", (eid,)).fetchone()[0]
-    if not vecs:
-        return redirect(url_for("admin", msg="Test: no face was found in the test photo. "
-                                             "Use a clear, front-facing photo."))
-    lines, n_faces = [], 0
-    for i, v in enumerate(vecs, 1):
-        n_faces, best = indexer.stats(c, eid, v)
-        hits = len(indexer.search(c, eid, v))
-        lines.append(f"face {i}: best score {best:.2f}, {hits} photos match")
-    msg = (f"Test result - album has {n_photos} photos and {n_faces} faces. "
-           f"Test photo has {len(vecs)} face(s): " + "; ".join(lines) +
-           f". A score of {config.MATCH_THRESHOLD:.2f} or more counts as the same person.")
-    if not n_faces:
-        msg += " The album has NO scanned faces - press 'Scan again' and wait for green."
-    return redirect(url_for("admin", msg=msg))
+    return redirect(url_for("admin", msg="Test result - " + _test_message(eid, img)))
 
 
 @app.post("/admin/requests/<int:sid>/<action>")

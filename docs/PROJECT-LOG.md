@@ -39,6 +39,8 @@ over many drives:
 
 | 18 | Selfie limit reached; allow a face photo if the selfie does not work; stop guessing | Guests can upload a face photo as well as take a selfie; limit raised to 30 tries; admin page has "Test a face photo" per album that shows the exact scores; at start the app checks the face engine and rescans any album that has no scanned photos |
 
+| 19 | Test showed "album has 0 photos and 0 faces"; scanning too slow; admin wants to test by selfie like a guest; wants to know why a scan fails | Scanner rewritten: several photos at once, large photos opened at half size, photos findable while the scan runs, speed and time left shown. Status line now gives the reason for an empty album (wrong folder, only RAW/HEIC files, unreadable files, drive offline). Admin page has "Test with my own selfie" using the camera |
+
 ## Files a user runs
 
 | File | Purpose |

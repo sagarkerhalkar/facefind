@@ -59,6 +59,30 @@ def get_engine():
         return _engine
 
 
+_local = threading.local()
+
+
+def thread_engine():
+    """One engine per scanning thread, so several photos are scanned at once."""
+    if not hasattr(_local, "engine"):
+        _local.engine = make_engine()
+    return _local.engine
+
+
+def make_engine():
+    return OpenCVEngine()
+
+
+def decode_fast(data: bytes):
+    """For scanning: big camera photos are opened at half size, which is
+    several times faster and still larger than the scan needs."""
+    arr = np.frombuffer(data, np.uint8)
+    img = cv2.imdecode(arr, cv2.IMREAD_REDUCED_COLOR_2)
+    if img is None or max(img.shape[:2]) < 1600:
+        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    return img
+
+
 def decode(data: bytes):
     """bytes -> BGR image (EXIF rotation applied) or None."""
     return cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)

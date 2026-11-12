@@ -3,6 +3,8 @@ and answers 'which photos contain this face?'."""
 import os
 import threading
 import time
+from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
@@ -17,27 +19,53 @@ _cache = {}            # event_id -> (matrix, photo_ids)
 _cache_lock = threading.Lock()
 
 
-def _scan(folder):
+def _scan(folder, st, others):
     root = Path(folder)
     for dirpath, _, files in os.walk(root):
         for fn in files:
-            if Path(fn).suffix.lower() in config.IMAGE_EXT:
+            ext = Path(fn).suffix.lower()
+            if ext in config.IMAGE_EXT:
                 p = Path(dirpath) / fn
+                st["counted"] += 1
+                if st["counted"] % 200 == 0:
+                    st["phase"] = f"Counting the photos ... {st['counted']} found so far"
                 yield p.relative_to(root).as_posix(), p
+            elif ext in config.OTHER_EXT:
+                others[ext] += 1
+
+
+def _embed_file(job):
+    """Runs in a scanning thread: read one photo, return its face signatures."""
+    root, rel, path = job
+    try:
+        mtime = path.stat().st_mtime
+        img = faces.decode_fast(path.read_bytes())
+        if img is None:
+            return job, mtime, None, "not a readable picture"
+        return job, mtime, faces.thread_engine().embed(img), ""
+    except Exception as e:
+        return job, 0, None, str(e)
+
+
+def _drop_cache(event_id):
+    with _cache_lock:
+        _cache.pop(event_id, None)
 
 
 def index_event(event_id):
-    """Scans every folder (drive) of the event. A drive that is switched off
-    or unplugged is skipped - its photos stay in the index until it is back."""
+    """Scans every folder (drive) of the album, several photos at a time.
+    Photos become findable while the scan is still running. A drive that is
+    switched off is skipped - its photos stay in the index until it is back."""
     con = db.connect()
     try:
         ev = con.execute("SELECT * FROM events WHERE id=?", (event_id,)).fetchone()
-        st = progress[event_id] = dict(state="running", done=0, total=0, faces=0,
-                                       error="", phase="")
-        engine = faces.get_engine()
+        st = progress[event_id] = dict(
+            state="running", done=0, total=0, faces=0, error="", phase="Starting ...",
+            counted=0, scanned=0, started=0.0, bad_count=0, bad="")
+        faces.get_engine()                      # fail early if the models are broken
         roots = db.split_folders(ev["folders"])
         notes = []
-        for r in roots:                       # Google Drive links: fetch new photos first
+        for r in roots:                         # Google Drive links: fetch new photos first
             if not r.startswith("gdrive:"):
                 continue
             def show(done, total):
@@ -49,64 +77,77 @@ def index_event(event_id):
                     notes.append(f"{failed} Drive photos could not be fetched ({note})")
             except gdrive.DriveError as e:
                 notes.append(str(e))
-        st["phase"] = ""
+        st["phase"] = "Counting the photos ..."
         online = [r for r in roots if Path(gdrive.local_root(r)).is_dir()]
         offline = [gdrive.label(r) for r in roots if r not in online]
         if offline:
             notes.append("Not reachable, skipped: " + ", ".join(offline))
+        others = Counter()
         files = [(root, rel, path) for root in online
-                 for rel, path in _scan(gdrive.local_root(root))]
+                 for rel, path in _scan(gdrive.local_root(root), st, others)]
+        if not files:
+            seen = ", ".join(f"{n} {ext} files" for ext, n in others.most_common(4))
+            notes.append("No JPG / PNG / WEBP photos were found in the folder"
+                         + (f" (it has {seen}, which this app cannot read)." if seen
+                            else ". Check that you chose the folder that holds the photos."))
         known = {(r["root"], r["relpath"]): (r["id"], r["mtime"]) for r in con.execute(
             "SELECT id,root,relpath,mtime FROM photos WHERE event_id=?", (event_id,))}
-        st["total"] = len(files)
-        st["error"] = " ".join(notes)
-        seen = set()
-        for root, rel, path in files:
-            key = (root, rel)
-            seen.add(key)
+        seen_keys = {(root, rel) for root, rel, _ in files}
+        todo = []
+        for job in files:                       # unchanged photos are not scanned again
+            root, rel, path = job
             try:
-                mtime = path.stat().st_mtime
-                if key in known and known[key][1] == mtime:
-                    continue
-                img = faces.decode(path.read_bytes())
-                if img is None:
-                    continue
-                vecs = engine.embed(img)
-                if key in known:
-                    pid = known[key][0]
-                    con.execute("DELETE FROM faces WHERE photo_id=?", (pid,))
-                    con.execute("UPDATE photos SET mtime=? WHERE id=?", (mtime, pid))
-                    (config.CACHE_DIR / f"{pid}.jpg").unlink(missing_ok=True)
-                else:
-                    pid = con.execute(
-                        "INSERT INTO photos(event_id,root,relpath,mtime) VALUES(?,?,?,?)",
-                        (event_id, root, rel, mtime)).lastrowid
-                con.executemany(
-                    "INSERT INTO faces(photo_id,event_id,embedding) VALUES(?,?,?)",
-                    [(pid, event_id, v.astype(np.float32).tobytes()) for v in vecs])
-                st["faces"] += len(vecs)
-            except Exception as e:           # one bad file must not stop the run
-                st["bad"] = f"{rel}: {e}"
-            finally:
-                st["done"] += 1
-                if st["done"] % 50 == 0:
-                    con.commit()
+                same = (root, rel) in known and known[(root, rel)][1] == path.stat().st_mtime
+            except OSError:
+                same = False
+            if not same:
+                todo.append(job)
+        st.update(total=len(files), done=len(files) - len(todo), phase="",
+                  error=" ".join(notes), started=time.time())
+        with ThreadPoolExecutor(config.SCAN_WORKERS) as pool:
+            for start in range(0, len(todo), 40):
+                for job, mtime, vecs, problem in pool.map(_embed_file, todo[start:start + 40]):
+                    root, rel, path = job
+                    st["done"] += 1
+                    st["scanned"] += 1
+                    if vecs is None:
+                        st["bad_count"] += 1
+                        st["bad"] = f"{rel}: {problem}"
+                        continue
+                    key = (root, rel)
+                    if key in known:
+                        pid = known[key][0]
+                        con.execute("DELETE FROM faces WHERE photo_id=?", (pid,))
+                        con.execute("UPDATE photos SET mtime=? WHERE id=?", (mtime, pid))
+                        (config.CACHE_DIR / f"{pid}.jpg").unlink(missing_ok=True)
+                    else:
+                        pid = con.execute(
+                            "INSERT INTO photos(event_id,root,relpath,mtime) VALUES(?,?,?,?)",
+                            (event_id, root, rel, mtime)).lastrowid
+                    con.executemany(
+                        "INSERT INTO faces(photo_id,event_id,embedding) VALUES(?,?,?)",
+                        [(pid, event_id, v.astype(np.float32).tobytes()) for v in vecs])
+                    st["faces"] += len(vecs)
+                con.commit()                    # guests can already find these photos
+                _drop_cache(event_id)
         # Remove from the index: photos deleted from a reachable drive, and
-        # photos of folders that were taken off the event's list.
+        # photos of folders that were taken off the album's list.
         for (root, rel), (pid, _) in known.items():
-            if (root in online and (root, rel) not in seen) or root not in roots:
+            if (root in online and (root, rel) not in seen_keys) or root not in roots:
                 con.execute("DELETE FROM faces WHERE photo_id=?", (pid,))
                 con.execute("DELETE FROM matches WHERE photo_id=?", (pid,))
                 con.execute("DELETE FROM photos WHERE id=?", (pid,))
                 (config.CACHE_DIR / f"{pid}.jpg").unlink(missing_ok=True)
         con.commit()
+        if st["bad_count"]:
+            st["error"] = (st["error"] + f" {st['bad_count']} files could not be read "
+                           f"(last: {st['bad']}).").strip()
         st["state"] = "finished"
     except Exception as e:
         progress[event_id] = dict(state="failed", done=0, total=0, faces=0, error=str(e), phase="")
     finally:
         con.close()
-        with _cache_lock:
-            _cache.pop(event_id, None)
+        _drop_cache(event_id)
 
 
 def start_index(event_id):

@@ -94,4 +94,8 @@ _thr = os.environ.get("MATCH_THRESHOLD", "").strip()
 MATCH_THRESHOLD = 0.363 if _thr in ("", "0.40") else float(_thr)
 MAX_RESULTS = 500
 PREVIEW_SIDE = 900
+# Photos scanned at the same time. More = faster, but the PC gets busier.
+SCAN_WORKERS = int(os.environ.get("SCAN_WORKERS", "0")) or max(1, min(6, (os.cpu_count() or 2) - 1))
+OTHER_EXT = {".heic", ".heif", ".cr2", ".cr3", ".nef", ".arw", ".dng", ".raf", ".rw2",
+             ".orf", ".tif", ".tiff", ".gif", ".psd"}   # seen but not readable
 IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}

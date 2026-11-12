@@ -50,6 +50,44 @@
     });
   }
 
+  // ---- test an album with a live selfie
+  document.querySelectorAll(".tester").forEach((box) => {
+    const video = box.querySelector("video"), cam = box.querySelector(".cam");
+    const open = box.querySelector(".t-open"), snap = box.querySelector(".t-snap");
+    const out = box.querySelector(".t-result");
+    let stream = null;
+    const tell = (t) => { out.textContent = t; out.hidden = false; };
+    open.addEventListener("click", async () => {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: { ideal: 1280 } }, audio: false });
+        video.srcObject = stream;
+        cam.hidden = false; snap.hidden = false; open.hidden = true;
+      } catch (e) { tell("Camera could not be opened. Allow camera access, or choose a photo below."); }
+    });
+    snap.addEventListener("click", async () => {
+      if (!video.videoWidth) return tell("Camera is not ready yet.");
+      const c = document.createElement("canvas");
+      const k = Math.min(1, 1280 / Math.max(video.videoWidth, video.videoHeight));
+      c.width = Math.round(video.videoWidth * k); c.height = Math.round(video.videoHeight * k);
+      c.getContext("2d").drawImage(video, 0, 0, c.width, c.height);
+      snap.disabled = true; tell("Testing ...");
+      try {
+        const r = await fetch("/admin/events/" + box.dataset.eid + "/test-selfie", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-CSRF": box.dataset.csrf },
+          body: JSON.stringify({ image: c.toDataURL("image/jpeg", 0.92) }) });
+        tell(r.ok ? (await r.json()).text : "Please sign in again.");
+      } catch (e) { tell("No connection to the app."); }
+      snap.disabled = false;
+    });
+    box.addEventListener("toggle", () => {
+      if (!box.open && stream) {
+        stream.getTracks().forEach((t) => t.stop()); stream = null;
+        cam.hidden = true; snap.hidden = true; open.hidden = false;
+      }
+    });
+  });
+
   // ---- live scan status
   const running = () => document.querySelectorAll('.status[data-state="running"]').length > 0;
   async function poll() {

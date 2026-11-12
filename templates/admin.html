@@ -78,9 +78,14 @@
   <form class="inline" method="post" action="{{ url_for('admin_event_action', eid=e.id, action='index') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small ghost">Scan again (new photos)</button></form>
   <form class="inline" method="post" action="{{ url_for('admin_event_action', eid=e.id, action='toggle') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small ghost">{{ "Close link" if e.active else "Open link" }}</button></form>
   <form class="inline" method="post" action="{{ url_for('admin_event_action', eid=e.id, action='approval') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small ghost">Ask me first: {{ "ON" if e.require_approval else "OFF" }}</button></form>
-  <details><summary>Test: does a face photo match this album?</summary>
+  <details class="tester" data-eid="{{ e.id }}" data-csrf="{{ csrf }}"><summary>Test with my own selfie or a photo</summary>
+  <p class="hint">Works like the guest page, but without email or code, and it shows the scores.</p>
+  <button type="button" class="small t-open">Open camera</button>
+  <div class="cam small-cam" hidden><video autoplay playsinline muted></video></div>
+  <button type="button" class="small t-snap" hidden>Take selfie and test</button>
+  <p class="status t-result" hidden></p>
   <form method="post" enctype="multipart/form-data" action="{{ url_for('admin_event_test', eid=e.id) }}"><input type="hidden" name="csrf" value="{{ csrf }}">
-  <label for="tp{{ e.id }}">Choose a clear photo of one person's face</label>
+  <label for="tp{{ e.id }}">Or choose a clear photo of one person's face</label>
   <input id="tp{{ e.id }}" name="photo" type="file" accept="image/*" required>
   <button class="small">Test this photo</button>
   <p class="hint">The result appears at the top of this page. It does not use an OTP or count as a guest try.</p></form></details>
