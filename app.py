@@ -222,6 +222,8 @@ def otp_send():
         mailer.send_otp(email, code, ev["name"])
     except Exception as e:
         app.logger.error("mail failed: %s", e)
+        db.audit(c, "mail_failed", email, ev["id"], str(e)[:200], ip())
+        c.commit()
         return err("We could not send the email. Please try again later.", 502)
     return jsonify(ok=True, ttl=config.OTP_TTL)
 
