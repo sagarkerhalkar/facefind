@@ -72,22 +72,28 @@ def _drive_image(info):
     if img is not None:
         meta = info.get("imageMediaMetadata") or {}
         original = max(int(meta.get("width") or 0), int(meta.get("height") or 0))
-        need = min(1200, int(original * 0.9)) if original else 1000
+        need = min(1200, config.SCAN_SIDE, int(original * 0.9)) if original else 1000
         if max(img.shape[:2]) >= need:
-            return img
-    return faces.decode_fast(gdrive.fetch_full(info["id"]))
+            return img, "small"
+    return faces.decode_fast(gdrive.fetch_full(info["id"])), "full"
 
 
 def _embed_file(job):
     """Runs in a scanning thread: read one photo, return its face signatures."""
+    t0 = time.time()
+    job["t_read"] = job["t_face"] = 0.0
     try:
         if job["info"] is not None:
-            img = _drive_image(job["info"])
+            img, job["how"] = _drive_image(job["info"])
         else:
-            img = faces.decode_fast(job["path"].read_bytes())
+            img, job["how"] = faces.decode_fast(job["path"].read_bytes()), "file"
+        t1 = time.time()
+        job["t_read"] = t1 - t0
         if img is None:
             return job, None, "not a readable picture"
-        return job, faces.thread_engine().embed(img), ""
+        vecs = faces.thread_engine().embed(img)
+        job["t_face"] = time.time() - t1
+        return job, vecs, ""
     except Exception as e:
         return job, None, str(e)[:200]
 
@@ -152,7 +158,8 @@ def index_event(event_id):
     con = db.connect()
     st = progress[event_id] = dict(
         state="running", done=0, total=0, faces=0, error="", phase="Starting ...",
-        scanned=0, started=time.time(), bad_count=0, bad="", listing=True)
+        scanned=0, started=time.time(), bad_count=0, bad="", listing=True,
+        t_read=0.0, t_face=0.0, full=0, took=0.0)
     try:
         ev = con.execute("SELECT * FROM events WHERE id=?", (event_id,)).fetchone()
         db.kv_set(con, f"scanning:{event_id}", "1")
@@ -196,6 +203,9 @@ def index_event(event_id):
                 for job, vecs, problem in pool.map(_embed_file, todo):
                     st["done"] += 1
                     st["scanned"] += 1
+                    st["t_read"] += job["t_read"]
+                    st["t_face"] += job["t_face"]
+                    st["full"] += job.get("how") == "full"
                     if vecs is None:
                         st["bad_count"] += 1
                         st["bad"] = f"{job['rel']}: {problem}"
@@ -239,12 +249,26 @@ def index_event(event_id):
             if r in complete and gdrive.is_drive(r):
                 gdrive.drop_old_copy(r[7:])
         st["error"] = " ".join(notes)
+        st["took"] = time.time() - st["started"]
         st["state"] = "finished"
     except Exception as e:
         st.update(state="failed", error=str(e), phase="")
     finally:
         con.close()
         _drop_cache(event_id)
+
+
+def timing(st):
+    """Where the scan's time goes, in plain words - shown on the admin page."""
+    n = st.get("scanned", 0)
+    if not n:
+        return ""
+    text = (f"Per photo: {st['t_read'] / n:.1f} s to read it, "
+            f"{st['t_face'] / n:.1f} s to find the faces.")
+    if st.get("full"):
+        text += (f" {st['full']} photos had to be read from Drive in full size "
+                 "(Google had no small version) - that is the slow part.")
+    return text
 
 
 def unfinished(con):

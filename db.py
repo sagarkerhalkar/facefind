@@ -49,11 +49,11 @@ def init():
     con.executescript(SCHEMA)
     # Added later: where a Google Drive photo lives (its file id) and the
     # "version stamp" Drive gives it, so unchanged photos are not scanned twice.
-    cols = {r[1] for r in con.execute("PRAGMA table_info(photos)")}
-    if "ref" not in cols:
-        con.execute("ALTER TABLE photos ADD COLUMN ref TEXT DEFAULT ''")
-    if "stamp" not in cols:
-        con.execute("ALTER TABLE photos ADD COLUMN stamp TEXT DEFAULT ''")
+    for table, col in (("photos", "ref"), ("photos", "stamp"),
+                       ("events", "event_date"),            # day of the event, YYYY-MM-DD
+                       ("sessions", "date_from"), ("sessions", "date_to")):
+        if col not in {r[1] for r in con.execute(f"PRAGMA table_info({table})")}:
+            con.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT DEFAULT ''")
     con.commit()
     con.close()
 

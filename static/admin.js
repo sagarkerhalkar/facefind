@@ -82,6 +82,13 @@
             const img = document.createElement("img");
             img.loading = "lazy"; img.alt = "Matched album photo";
             img.src = "/admin/photo/" + ph.id;
+            img.addEventListener("error", async () => {      // say why it is missing
+              try {
+                const why = await (await fetch(img.src)).text();
+                cap.textContent = "score " + ph.score.toFixed(2) + " - cannot show: " + why.slice(0, 200);
+              } catch (e) { /* no connection */ }
+              img.remove();
+            }, { once: true });
             const cap = document.createElement("figcaption");
             cap.textContent = "score " + ph.score.toFixed(2);
             fig.append(img, cap); grid.append(fig);

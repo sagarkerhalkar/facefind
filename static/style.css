@@ -11,7 +11,7 @@ h2 { font-size:18px; margin:28px 0 10px; }
 .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:22px; max-width:460px; margin:0 auto 16px; }
 .card.wide { max-width:none; }
 label { display:block; font-weight:600; margin:14px 0 6px; }
-input[type=email], input[type=text], input[type=password], input:not([type]) { width:100%; padding:12px; font:inherit; border:1px solid #aab4be; border-radius:8px; }
+input[type=email], input[type=text], input[type=password], input[type=date], input:not([type]) { width:100%; padding:12px; font:inherit; border:1px solid #aab4be; border-radius:8px; }
 input:focus-visible, button:focus-visible { outline:3px solid #7cc4bb; outline-offset:2px; }
 .check { display:flex; gap:10px; font-weight:400; font-size:14px; color:var(--soft); align-items:flex-start; }
 .check input { margin-top:4px; }
@@ -91,3 +91,7 @@ header form.inline { margin-left:auto; }
 /* very wide screens: more photos per row, not bigger ones */
 @media (min-width:1400px) { main { max-width:1320px; } }
 @media (prefers-reduced-motion:no-preference) { button { transition:opacity .15s; } }
+.grid h2.group { grid-column:1 / -1; margin:14px 0 0; }
+.dates { margin-bottom:14px; }
+.dates > div { min-width:130px; }
+.grid figcaption { word-break:break-word; }

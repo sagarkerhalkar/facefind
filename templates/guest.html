@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{ event.name if event else "Link not found" }} - {{ brand }}</title>
+<title>{{ event.name if event else ("Find your photos" if portal else "Link not found") }} - {{ brand }}</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
 <header><span class="brand">{{ brand }}</span>{% if event %}<span class="evname">{{ event.name }}</span>{% endif %}</header>
-<main id="app" data-code="{{ event.code if event else '' }}">
-{% if not event %}
+<main id="app" data-code="{{ event.code if event else '' }}" data-portal="{{ '1' if portal else '' }}">
+{% if not event and not portal %}
   <section class="card"><h1>Link not found</h1>
   <p>This photo link is not valid or the event is closed. Please ask the photographer for a new link.</p></section>
 {% else %}
@@ -18,12 +18,12 @@
 
   <section class="card" id="step-email" hidden>
     <h1>Find your photos</h1>
-    <p>Enter your email. We send a one-time code to make sure the photos reach only you.</p>
+    <p>Enter your email. We send a one-time code to make sure the photos reach only you.{% if portal %} You sign in once and then find your photos from every event you attended.{% endif %}</p>
     <form id="f-email">
       <label for="email">Email address</label>
       <input id="email" type="email" autocomplete="email" required placeholder="you@example.com">
       <label class="check"><input id="consent" type="checkbox" required>
-        <span>I agree that my selfie is used once to find my face in this event's photos. The selfie is not kept after matching.</span></label>
+        <span>I agree that my selfie is used once to find my face in {{ "the photos of the events in the dates I choose" if portal else "this event's photos" }}. The selfie is not kept after matching.</span></label>
       <button type="submit">Send code</button>
     </form>
   </section>
@@ -41,6 +41,11 @@
 
   <section class="card" id="step-selfie" hidden>
     <h1>Take a selfie</h1>
+    {% if portal %}<p>Choose the dates of the events you attended. All events in these dates are searched.</p>
+    <div class="row dates">
+      <div><label for="d-from">From</label><input id="d-from" type="date" value="{{ month_ago }}" max="{{ today }}" required></div>
+      <div><label for="d-to">To</label><input id="d-to" type="date" value="{{ today }}" max="{{ today }}" required></div>
+    </div>{% endif %}
     <p>Look straight at the camera, alone, in good light. Avoid glare on glasses.</p>
     <div class="cam"><video id="video" autoplay playsinline muted></video></div>
     <button id="snap" type="button">Take selfie and find my photos</button>

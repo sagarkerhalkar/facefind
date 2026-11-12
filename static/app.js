@@ -1,7 +1,8 @@
 (() => {
   const app = document.getElementById("app");
-  const code = app && app.dataset.code;
-  if (!code) return;
+  if (!app) return;
+  const code = app.dataset.code, portal = app.dataset.portal === "1";
+  if (!code && !portal) return;
   const $ = (id) => document.getElementById(id);
   const sections = ["step-email", "step-otp", "step-selfie", "step-pending", "step-gallery"];
   let email = "", stream = null, pollTimer = null;
@@ -86,7 +87,9 @@
     c.height = Math.round(h * scale);
     c.getContext("2d").drawImage(source, 0, 0, c.width, c.height);
     busy($("snap"), true); say("Looking for your photos...");
-    const r = await api("/api/selfie", { image: c.toDataURL("image/jpeg", 0.92) });
+    const body = { image: c.toDataURL("image/jpeg", 0.92) };
+    if (portal) { body.date_from = $("d-from").value; body.date_to = $("d-to").value; }
+    const r = await api("/api/selfie", body);
     busy($("snap"), false);
     if (!r.ok) {
       if (r.status_code === 401) return show("step-email", 1), say(r.error);
@@ -129,7 +132,20 @@
     $("dl-all").hidden = n === 0;
     const grid = $("grid");
     grid.textContent = "";
-    st.photos.forEach((id) => {
+    const groups = st.groups || [];
+    const named = portal || groups.length > 1;      // several events: one heading each
+    if (portal && st.date_from) { $("d-from").value = st.date_from; $("d-to").value = st.date_to; }
+    groups.forEach((grp) => {
+      if (named) {
+        const h = document.createElement("h2");
+        h.className = "group";
+        h.textContent = grp.name + (grp.date ? " - " + grp.date.split("-").reverse().join("-") : "") +
+          " (" + grp.photos.length + ")";
+        grid.append(h);
+      }
+      grp.photos.forEach(addPhoto);
+    });
+    function addPhoto(id) {
       const fig = document.createElement("figure");
       const img = document.createElement("img");
       img.loading = "lazy";
@@ -141,7 +157,7 @@
       b.addEventListener("click", () => download(id, b));
       fig.append(img, b);
       grid.append(fig);
-    });
+    }
   }
 
   async function download(what, btn) {

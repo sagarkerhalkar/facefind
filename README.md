@@ -31,6 +31,16 @@ The setup questions write this file for you; you can also edit it by hand.
 | `DEV_MODE` | `1` only while trying it on your own computer; `0` for real guests |
 | `TRUST_PROXY` | `1` once you put it online behind HTTPS (next section) |
 
+## One link for all events
+
+Give every album a **Date of the event** (asked when you create it; change it
+later under "Change the event date"). The admin page then shows **One link
+for all events**. A guest who opens it signs in once with email and code,
+chooses the dates of the events they attended, takes one selfie, and gets
+their photos from every open album inside those dates, grouped by event.
+Albums without a date are reachable only through their own link. Set
+`PORTAL=0` in `.env` to switch the general link off.
+
 ## Photos from many drives
 
 When you create an event, type one folder per line – from as many drives as

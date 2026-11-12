@@ -27,7 +27,8 @@ class OpenCVEngine:
         self.rec = cv2.FaceRecognizerSF.create(str(rec), "")
         self.lock = threading.Lock()
 
-    def embed(self, bgr, max_side=1600, min_face=36):
+    def embed(self, bgr, max_side=None, min_face=36):
+        max_side = max_side or config.SCAN_SIDE
         h, w = bgr.shape[:2]
         s = min(1.0, max_side / max(h, w))
         if s < 1.0:
@@ -75,10 +76,11 @@ def make_engine():
     return OpenCVEngine()
 
 
-def decode_fast(data: bytes, want=1600):
+def decode_fast(data: bytes, want=None):
     """For scanning: a big camera photo is opened directly at 1/2, 1/4 or 1/8
     size (whichever still leaves `want` pixels), which is several times
     faster than opening it in full and shrinking it afterwards."""
+    want = want or config.SCAN_SIDE
     arr = np.frombuffer(data, np.uint8)
     flag = cv2.IMREAD_COLOR
     try:
