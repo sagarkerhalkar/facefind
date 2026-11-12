@@ -166,7 +166,7 @@ def preview_file(row):
     A Google Drive photo is read from Drive for this - it is never copied."""
     if row["root"] not in db.split_folders(row["folders"]):
         abort(404)
-    dest = config.CACHE_DIR / f"{row['id']}.jpg"
+    dest = indexer.preview_path(row)
     if not dest.exists():
         if gdrive.is_drive(row["root"]):
             if not row["ref"]:

@@ -116,11 +116,31 @@ def _drop_cache(event_id):
         _cache.pop(event_id, None)
 
 
+def preview_path(row):
+    """Where the watermarked preview of a photo is kept. The name changes
+    when the photo changes, so an old preview can never be shown for it."""
+    import hashlib
+    tag = hashlib.sha256(f"{row['root']}|{row['relpath']}|{row['mtime']}|{row['stamp']}"
+                         .encode()).hexdigest()[:16]
+    return config.CACHE_DIR / f"{row['id']}-{tag}.jpg"
+
+
+def drop_preview(pid):
+    """Windows refuses to delete a file that is being sent to a browser at
+    that moment; that must not stop a scan, so such a file is left behind
+    (it is never used again, see preview_path)."""
+    for f in config.CACHE_DIR.glob(f"{pid}-*.jpg"):
+        try:
+            f.unlink()
+        except OSError:
+            pass
+
+
 def _forget_photo(con, pid):
     con.execute("DELETE FROM faces WHERE photo_id=?", (pid,))
     con.execute("DELETE FROM matches WHERE photo_id=?", (pid,))
     con.execute("DELETE FROM photos WHERE id=?", (pid,))
-    (config.CACHE_DIR / f"{pid}.jpg").unlink(missing_ok=True)
+    drop_preview(pid)
 
 
 def index_event(event_id):
@@ -187,7 +207,7 @@ def index_event(event_id):
                         con.execute("DELETE FROM matches WHERE photo_id=?", (pid,))
                         con.execute("UPDATE photos SET mtime=?, stamp=?, ref=? WHERE id=?",
                                     (job["mtime"], job["stamp"], job["ref"], pid))
-                        (config.CACHE_DIR / f"{pid}.jpg").unlink(missing_ok=True)
+                        drop_preview(pid)
                     else:
                         pid = con.execute(
                             "INSERT INTO photos(event_id,root,relpath,mtime,stamp,ref) "

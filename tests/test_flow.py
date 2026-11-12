@@ -164,12 +164,11 @@ os.rename(tmp / "driveE_off", tmp / "driveE")
 adm.post(f"/admin/events/{ev['id']}/folders", data={"csrf": csrf, "folders": str(d1)})
 e_pid = con.execute("SELECT id FROM photos WHERE root=? AND relpath='red2.png'", (str(d2.resolve()),)).fetchone()[0]
 assert g.get(f"/api/preview/{e_pid}").status_code == 404
-indexer.index_event(ev["id"]); assert con.execute("SELECT COUNT(*) FROM photos").fetchone()[0] == 2
+indexer.index_event(ev["id"]); assert con.execute("SELECT COUNT(*) FROM photos").fetchone()[0] == 2, indexer.progress[ev["id"]]
 print("ok  offline drive keeps index; removed folder is revoked")
 
 # path escape, closed event, sign out
 con.execute("UPDATE photos SET relpath='../../data/secret.key' WHERE id=?", (pid,)); con.commit()
-(config.CACHE_DIR / f"{pid}.jpg").unlink(missing_ok=True)
 assert g.get(f"/api/preview/{pid}").status_code == 404
 assert g.post("/api/forget", json={}, headers=H).status_code == 200 and g.get("/api/me").status_code == 401
 adm.post(f"/admin/events/{ev['id']}/toggle", data={"csrf": csrf})
