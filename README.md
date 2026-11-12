@@ -10,7 +10,7 @@ Nobody else can open or download them.
 2. Double-click **start.bat**. The first run installs what is needed and
    downloads the face models (about 40 MB).
 3. Answer the setup questions in the window: studio name, admin password
-   (6 characters or more), the mail id that sends the OTP, and the port.
+   (exactly 6 characters), the mail id that sends the OTP, and the port.
    To change the answers later run `setup.bat`.
 4. The window prints the addresses, for example
    `https://192.168.1.50:8443/admin`. Open it and sign in with your admin

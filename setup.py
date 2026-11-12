@@ -41,9 +41,10 @@ def ask_yes(question, default=True):
 
 def ask_password():
     while True:
-        p = ask_hidden(f"Admin password (at least {MIN_PASSWORD} characters, no spaces)")
-        if len(p) < MIN_PASSWORD or " " in p or '"' in p or "'" in p:
-            print(f"  Please use {MIN_PASSWORD} or more characters, without spaces or quotes.")
+        p = ask_hidden(f"Admin password (exactly {MIN_PASSWORD} characters, no spaces)")
+        if len(p) != MIN_PASSWORD or " " in p or '"' in p or "'" in p:
+            print(f"  You typed {len(p)} characters. Please type exactly {MIN_PASSWORD}, "
+                  "without spaces or quotes.")
             continue
         if ask_hidden("Type it once more") != p:
             print("  The two did not match. Try again.")
