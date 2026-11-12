@@ -6,6 +6,7 @@ import hmac
 import os
 import re
 import secrets
+import sys
 import tempfile
 import time
 import zipfile
@@ -562,6 +563,16 @@ def admin_selfie(sid):
     return send_file(p, mimetype="image/jpeg")
 
 
+def _open_browser(url):
+    """Opens the admin page by itself a moment after the app starts."""
+    if os.environ.get("NO_BROWSER") or not sys.stdin.isatty():
+        return
+    import threading
+    import webbrowser
+    print(f"Opening {url} in your browser ...")
+    threading.Timer(2.0, lambda: webbrowser.open(url)).start()
+
+
 def main():
     host = config.HOST
     port = netutil.free_port(host, config.PORT)
@@ -577,9 +588,12 @@ def main():
         print(f"If other devices cannot connect, allow TCP port {port} in the firewall.\n")
     if config.HTTPS:
         cert, key = netutil.ensure_cert(config.TLS_DIR, config.TLS_NAMES)
+        netutil.offer_trust(cert)
+        _open_browser(f"https://localhost:{port}/admin")
         from werkzeug.serving import run_simple
         run_simple(host, port, app, threaded=True, ssl_context=(str(cert), str(key)))
     else:
+        _open_browser(f"http://localhost:{port}/admin")
         try:
             from waitress import serve
             serve(app, host=host, port=port, threads=8)

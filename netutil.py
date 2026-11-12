@@ -3,7 +3,10 @@ HTTPS certificate, and limit access to chosen networks / VLANs."""
 import datetime
 import ipaddress
 import json
+import os
 import socket
+import subprocess
+import sys
 from pathlib import Path
 
 
@@ -81,7 +84,7 @@ def ensure_cert(folder, extra_names=()):
                     *[n.strip() for n in extra_names if n.strip()]})
     if cert_f.exists() and key_f.exists() and names_f.exists():
         try:
-            if json.loads(names_f.read_text()) == names:
+            if json.loads(names_f.read_text()) == {"v": 2, "names": names}:
                 return cert_f, key_f
         except ValueError:
             pass
@@ -101,7 +104,9 @@ def ensure_cert(folder, extra_names=()):
             .not_valid_before(now - datetime.timedelta(days=1))
             .not_valid_after(now + datetime.timedelta(days=397))
             .add_extension(x509.SubjectAlternativeName(san), critical=False)
-            .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
+            .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+            .add_extension(x509.ExtendedKeyUsage([x509.oid.ExtendedKeyUsageOID.SERVER_AUTH]),
+                           critical=False)
             .sign(key, hashes.SHA256()))
     key_f.write_bytes(key.private_bytes(
         serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
@@ -111,5 +116,31 @@ def ensure_cert(folder, extra_names=()):
     except OSError:
         pass
     cert_f.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
-    names_f.write_text(json.dumps(names))
+    names_f.write_text(json.dumps({"v": 2, "names": names}))
+    (folder / "trusted").unlink(missing_ok=True)
     return cert_f, key_f
+
+
+def offer_trust(cert_f):
+    """Windows only, asked once: add the app's own certificate to this
+    user's trusted list so the browser on THIS computer shows no warning.
+    The certificate can only vouch for this app, nothing else."""
+    marker = Path(cert_f).parent / "trusted"
+    if os.name != "nt" or marker.exists() or not sys.stdin.isatty():
+        return
+    print("\nThe browser will warn 'connection is not private' because the")
+    print("HTTPS certificate is made by this app.")
+    a = input("Remove that warning on THIS computer? Windows will ask - press Yes. [Y/n]: ")
+    if a.strip().lower().startswith("n"):
+        marker.write_text("declined")
+        return
+    try:
+        r = subprocess.run(["certutil", "-user", "-addstore", "Root", str(cert_f)],
+                           capture_output=True, text=True, timeout=120)
+        if r.returncode == 0:
+            marker.write_text("yes")
+            print("Done. Close and reopen the browser if it still warns.")
+            return
+    except Exception:
+        pass
+    print("Could not do it automatically. In the browser press Advanced > Proceed.")
