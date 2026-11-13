@@ -99,10 +99,10 @@ PREVIEW_SIDE = 900
 # Photos scanned at the same time. More = faster, but the PC gets busier.
 SCAN_WORKERS = int(os.environ.get("SCAN_WORKERS", "0")) or max(1, min(6, (os.cpu_count() or 2) - 1))
 # Google Drive photos are read straight from Drive into memory (never saved).
-DRIVE_WORKERS = int(os.environ.get("DRIVE_WORKERS", "8"))   # Drive photos read at the same time
+DRIVE_WORKERS = int(os.environ.get("DRIVE_WORKERS", "16"))   # Drive photos read at the same time
 # Size (longest side, pixels) at which photos are searched for faces. 1600 finds
 # small faces in group photos; 1280 is about a third faster but can miss them.
-SCAN_SIDE = int(os.environ.get("SCAN_SIDE", "1600"))
+SCAN_SIDE = int(os.environ.get("SCAN_SIDE", "1280"))
 DRIVE_SCAN_SIDE = SCAN_SIDE  # size asked from Drive for scanning
 # One general guest link: the guest signs in once with email, picks the dates,
 # and all open albums with a date in that range are searched.

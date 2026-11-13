@@ -47,6 +47,8 @@ over many drives:
 
 | 22 | Personal login; after login choose the date range, then the events (several), then selfie, preview, download; bookmark photos for later; no approval, but the admin must have a record of name, phone, email and which photos were downloaded; scan all photo types (JPG, ARW, HEIC ...); a selfie still shows another person's photo - "must be 100% proof" | **Sign-in** now asks name, phone and email (code goes to the email; the phone is recorded, not verified). **General link flow**: dates, tick the events, selfie, photos grouped by event. **Save** button under every photo; saved photos are kept per email and open at the next sign-in without a new selfie ("My saved photos", "Download all saved"). **New albums give photos without approval** by default (the switch is still there). **Who downloaded photos** on the admin page: name, phone, email, number of photos, the file names, and a full record file for Excel. **Photo types**: TIFF, HEIC (iPhone) and camera RAW (ARW, CR2, CR3, NEF, DNG, RAF, RW2, ORF ...) are read; on Google Drive they use Google's ready-made picture. **Wrong person**: default strictness raised from 0.36 to 0.45 and made a setting on the admin page ("Match strictness"); the admin test shows the score of every photo so the bar can be set just above a wrong match. No face system is 100% - stated again |
 
+| 23 | Scanning too slow; no approval; select several photos to download; not 100% of photos scanned; all DSLR types; admin panel confusing with lakhs of events and users; look not international, not good on mobile; admin creates users for loading Drive links; company logo on downloaded photos, changeable; login background and logo changeable; next event details and advertisements before and after login; better login; 3D effects, colours, animation | **New look** for guest and admin (indigo and marigold, layered depth, a tilting stack of prints on the sign-in page, one colour setting). **Admin split into sections**: Albums, Guests and downloads, Look and promotions, Staff, Settings. Albums and guests are **searched and shown in pages** (20 / 30 per page). **Staff accounts**: the owner adds user name + password; staff can add albums, paste Drive links, scan and test, nothing else. **Look**: studio name, colour, logo, sign-in background, and an option to put the logo in the top right corner of downloaded photos. **Promotions**: next events and offers, shown before and/or after sign-in; past events hide themselves. **Tick several photos** and download them as one zip. **Approval switched off** on all existing albums (the per-album switch remains). **Files that were not scanned** are listed per album with the reason. **Scan**: default detail changed to Fast (about 40% more photos per second on the test machine), Drive reads 16 photos at a time; a Scan detail setting was added |
+
 ## Files a user runs
 
 | File | Purpose |
@@ -58,6 +60,13 @@ over many drives:
 
 ## Known limits (stated during the conversation)
 
+- Scan speed measured on the build machine (2 processor cores, photos on the
+  local disk): about 9 photos per second at Detailed, 13 at Fast. Photos on
+  Google Drive are limited by the internet line, not by the PC.
+- The logo on downloads re-saves the photo as JPG (quality 95); RAW and HEIC
+  files are sent unchanged, without logo.
+- Staff passwords are stored hashed (scrypt). The owner password is still the
+  one in `.env`.
 - Face matching is never 100%: look-alikes, small or blurred faces can give a
   wrong photo. Higher strictness means fewer wrong photos and more missed ones.
 - Without approval and without a liveness check, a person can upload someone

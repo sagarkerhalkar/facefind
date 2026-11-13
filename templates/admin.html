@@ -1,37 +1,68 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#16132d">
 <title>Admin - {{ brand }}</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"></head>
-<body><header><span class="brand">{{ brand }}</span><span class="evname">Admin</span>
-<form class="inline" method="post" action="{{ url_for('admin_logout') }}"><button class="small ghost" type="submit">Sign out</button></form></header>
-<main>
-{% if msg %}<p class="note">{{ msg }}</p>{% endif %}
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=4">
+<link rel="stylesheet" href="{{ url_for('brand_theme') }}?v={{ studio.v }}">
+</head>
+<body><div class="admin">
+<nav class="side" aria-label="Sections">
+  <span class="mark">{% if studio.logo %}<img src="{{ url_for('brand_logo') }}?v={{ studio.v }}" alt="{{ brand }}">{% else %}{{ brand }}{% endif %}</span>
+  <a class="nav {{ 'on' if page == 'albums' }}" href="{{ url_for('admin') }}">Albums</a>
+  {% if owner %}
+  <a class="nav {{ 'on' if page == 'guests' }}" href="{{ url_for('admin_guests') }}">Guests and downloads</a>
+  <a class="nav {{ 'on' if page == 'brand' }}" href="{{ url_for('admin_brand') }}">Look and promotions</a>
+  <a class="nav {{ 'on' if page == 'team' }}" href="{{ url_for('admin_team') }}">Staff</a>
+  <a class="nav {{ 'on' if page == 'settings' }}" href="{{ url_for('admin_settings_page') }}">Settings</a>
+  {% endif %}
+  <div class="who"><span>Signed in as {{ who }}</span>
+  <form method="post" action="{{ url_for('admin_logout') }}"><button class="small ghost" type="submit">Sign out</button></form></div>
+</nav>
+<main class="work">
+{% if msg %}<p class="note" role="status">{{ msg }}</p>{% endif %}
+
+{% if page == 'albums' %}
+<h1>Albums</h1>
+<div class="stats">
+  <div class="stat"><b>{{ "{:,}".format(totals.albums) }}</b><span>albums</span></div>
+  <div class="stat"><b>{{ "{:,}".format(totals.photos) }}</b><span>photos scanned</span></div>
+  <div class="stat"><b>{{ "{:,}".format(totals.guests) }}</b><span>guests signed in</span></div>
+  <div class="stat"><b>{{ "{:,}".format(totals.downloads) }}</b><span>photos downloaded</span></div>
+</div>
 
 {% if pending %}
-<h2>People waiting for your OK</h2>
-<div class="card wide scroll"><table>
+<div class="card"><h2>People waiting for your OK</h2><div class="scroll"><table>
 <tr><th>Their selfie</th><th>Email</th><th>Album</th><th>Photos found</th><th></th></tr>
 {% for p in pending %}<tr>
 <td><img class="selfie" src="{{ url_for('admin_selfie', sid=p.id) }}" alt="Selfie sent by {{ p.email }}"></td>
 <td>{{ p.email }}</td><td>{{ p.name }}{% if p.date_from %} ({{ p.date_from }} to {{ p.date_to }}){% endif %}</td><td>{{ p.n }}</td>
 <td><form class="inline" method="post" action="{{ url_for('admin_request', sid=p.id, action='approve') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small">Give photos</button></form>
 <form class="inline" method="post" action="{{ url_for('admin_request', sid=p.id, action='reject') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small danger">Refuse</button></form></td>
-</tr>{% endfor %}</table></div>
+</tr>{% endfor %}</table></div></div>
 {% endif %}
 
-<h2>Step 1 - Add an album</h2>
-<form class="card wide" method="post" action="{{ url_for('admin_event_create') }}">
-<input type="hidden" name="csrf" value="{{ csrf }}">
-<label for="name">Album name (guests see this)</label>
-<input id="name" name="name" type="text" required placeholder="Sharma wedding">
-<label for="event_date">Date of the event</label>
-<input id="event_date" name="event_date" type="date" value="{{ today }}">
-<p class="hint">Guests who use the general link choose their dates; this album is searched when its date is inside them.</p>
+{% if portal_link %}
+<div class="card">
+  <div class="bar"><h2>One link for all events</h2><span class="pill on">Send this to everyone</span></div>
+  <div class="linkrow"><input id="plink" type="text" readonly value="{{ portal_link }}" aria-label="General guest link">
+    <button type="button" class="copy nomargin" data-target="plink">Copy link</button></div>
+  <p class="hint">The guest signs in once, picks dates, ticks their events, takes one selfie and gets their photos. Albums without a date are not included.</p>
+</div>
+{% endif %}
+
+<details class="card" id="new-album" {{ 'open' if not totals.albums }}><summary>Add a new album</summary>
+<form method="post" action="{{ url_for('admin_event_create') }}"><input type="hidden" name="csrf" value="{{ csrf }}">
+<div class="row"><div><label for="name">Album name (guests see this)</label>
+<input id="name" name="name" type="text" required placeholder="Sharma wedding"></div>
+<div><label for="event_date">Date of the event</label>
+<input id="event_date" name="event_date" type="date" value="{{ today }}"></div></div>
 <label for="folders">Where are the photos?</label>
-<p class="hint"><b>Option A:</b> paste a Google Drive folder link in the box below (one link per line). The photos are scanned on Drive itself - nothing is copied to this computer.<br>
-<b>Option B:</b> press <b>Choose folder</b> and pick a folder on this computer or on any connected drive. You can mix both.<br>
-For photos that are on Google Drive, use the link (Option A), not the <code>G:</code> drive letter: through <code>G:</code> Windows downloads every photo first, which is slow.</p>
-<button type="button" class="ghost nomargin" id="browse-open">Choose folder</button>
+<p class="hint">Paste a Google Drive folder link (one per line), or press Choose folder for a folder on this computer or any connected drive. You can mix both. Photos on Drive are scanned there - nothing is copied.{% if not drive_email %} <b>Google Drive is not connected yet{% if owner %} - connect it under Settings{% else %} - ask the owner{% endif %}.</b>{% endif %}</p>
+{% if drive_email %}<p class="hint">Share each Drive folder with <code>{{ drive_email }}</code> (Viewer) before pasting its link.</p>{% endif %}
+<button type="button" class="ghost small" id="browse-open">Choose folder</button>
 <div id="browser" class="browser" hidden>
   <div class="browser-head"><button type="button" class="small ghost" id="b-up">Back</button> <span id="b-path"></span></div>
   <ul id="b-list"></ul>
@@ -39,19 +70,151 @@ For photos that are on Google Drive, use the link (Option A), not the <code>G:</
   <button type="button" class="small ghost" id="b-close">Close</button></div>
 </div>
 <textarea id="folders" name="folders" rows="3" required placeholder="https://drive.google.com/drive/folders/...   or   D:\Photos\Sharma"></textarea>
-<label class="check"><input type="checkbox" name="approval"><span>Ask me before a guest gets photos. Leave unticked to give photos at once; every download is recorded with the guest's name, phone and email.</span></label>
 <p class="hint">Photo types read: JPG, PNG, WEBP, BMP, TIFF, HEIC (iPhone) and camera RAW files (ARW, CR2, CR3, NEF, DNG, RAF, RW2, ORF and more).</p>
 <button type="submit">Create album and scan photos</button>
+</form></details>
+
+<form class="toolbar" method="get" action="{{ url_for('admin') }}" role="search">
+  <input type="search" name="q" value="{{ q }}" placeholder="Search albums by name or date (2026-11)" aria-label="Search albums">
+  <select name="show" aria-label="Show"><option value="">All albums</option><option value="open" {{ 'selected' if show == 'open' }}>Link open</option><option value="closed" {{ 'selected' if show == 'closed' }}>Link closed</option></select>
+  <button type="submit" class="dark">Search</button>
+  {% if q or show %}<a class="btn ghost" href="{{ url_for('admin') }}">Clear</a>{% endif %}
+</form>
+<p class="hint">{{ "{:,}".format(total) }} album{{ '' if total == 1 else 's' }}{% if q %} matching "{{ q }}"{% endif %}. Click an album to open it.</p>
+
+{% for e in events %}
+<details class="album" {{ 'open' if e.state in ('running', 'failed', 'empty') or events|length == 1 }}>
+  <summary><b>{{ e.name }}</b><span class="mini date">{{ e.event_date or "no date" }}</span>
+    <span><span class="pill {{ 'on' if e.active else 'off' }}">{{ "Link open" if e.active else "Link closed" }}</span></span>
+    <span class="mini">{{ "{:,}".format(e.photos) }} photos, {{ "{:,}".format(e.faces) }} faces{% if e.n_errors %}, {{ e.n_errors }} not scanned{% endif %}</span></summary>
+  <div class="album-body">
+  <p class="status {{ e.state }}" data-eid="{{ e.id }}" data-state="{{ e.state }}">{{ e.status }}</p>
+  <label for="link{{ e.id }}">Link for this album only</label>
+  <div class="linkrow"><input id="link{{ e.id }}" type="text" readonly value="{{ e.link }}">
+    <button type="button" class="copy nomargin" data-target="link{{ e.id }}">Copy link</button></div>
+  <p class="hint">Photos come from:{% for f, up in e.folder_list %} <code>{{ f }}</code>{% if not up %} <b>(drive not connected)</b>{% endif %}{% endfor %}</p>
+  {% set keep %}<input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="q" value="{{ q }}"><input type="hidden" name="page" value="{{ page_no }}">{% endset %}
+  <form class="inline" method="post" action="{{ url_for('admin_event_action', eid=e.id, action='index') }}">{{ keep }}<button class="small ghost">Scan again (new photos)</button></form>
+  <form class="inline" method="post" action="{{ url_for('admin_event_action', eid=e.id, action='toggle') }}">{{ keep }}<button class="small ghost">{{ "Close link" if e.active else "Open link" }}</button></form>
+  <form class="inline" method="post" action="{{ url_for('admin_event_action', eid=e.id, action='approval') }}">{{ keep }}<button class="small ghost">Ask me before giving photos: {{ "ON" if e.require_approval else "OFF" }}</button></form>
+  {% if e.n_errors %}<details><summary>Files that were not scanned ({{ e.n_errors }})</summary>
+  <p class="hint">These files could not be opened. Everything else in the album was scanned.</p>
+  <div class="scroll"><table><tr><th>File</th><th>Reason</th></tr>
+  {% for x in e.errors %}<tr><td>{{ x.relpath }}</td><td>{{ x.reason }}</td></tr>{% endfor %}</table></div>
+  {% if e.n_errors > e.errors|length %}<p class="hint">Showing the first {{ e.errors|length }}.</p>{% endif %}</details>{% endif %}
+  <details class="tester" data-eid="{{ e.id }}" data-csrf="{{ csrf }}"><summary>Test with my own selfie or a photo</summary>
+  <p class="hint">Works like the guest page, without email or code. You see each photo's score.</p>
+  <button type="button" class="small t-open">Open camera</button>
+  <div class="cam small-cam" hidden><video autoplay playsinline muted></video></div>
+  <button type="button" class="small t-snap" hidden>Take selfie and test</button>
+  <label for="tp{{ e.id }}">Or choose a clear photo of one person's face</label>
+  <input id="tp{{ e.id }}" class="t-file" type="file" accept="image/*">
+  <p class="status t-result" role="status" hidden></p>
+  <div class="grid t-grid"></div></details>
+  <details><summary>Change the event date{% if not e.event_date %} (no date yet - not in the general link){% endif %}</summary>
+  <form method="post" action="{{ url_for('admin_event_action', eid=e.id, action='date') }}">{{ keep }}
+  <label for="dt{{ e.id }}">Date of the event</label>
+  <input id="dt{{ e.id }}" name="event_date" type="date" value="{{ e.event_date }}"><button class="small">Save date</button></form></details>
+  <details><summary>Add or change folders</summary>
+  <form method="post" action="{{ url_for('admin_event_action', eid=e.id, action='folders') }}">{{ keep }}
+  <label for="fl{{ e.id }}">Folders or Drive links, one per line</label>
+  <textarea id="fl{{ e.id }}" name="folders" rows="3">{{ e.folders }}</textarea><button class="small">Save and scan</button></form></details>
+  </div>
+</details>
+{% else %}<p class="card">{{ "No album matches this search." if q or show else "No albums yet. Add the first one above." }}</p>{% endfor %}
+{% if pages > 1 %}<nav class="pager" aria-label="Pages">
+{% if page_no > 1 %}<a class="btn ghost small" href="{{ url_for('admin', q=q, page=page_no-1, show=show) }}">Previous</a>{% endif %}
+<span>Page {{ page_no }} of {{ pages }}</span>
+{% if page_no < pages %}<a class="btn ghost small" href="{{ url_for('admin', q=q, page=page_no+1, show=show) }}">Next</a>{% endif %}
+</nav>{% endif %}
+
+{% elif page == 'guests' %}
+<h1>Guests and downloads</h1>
+<form class="toolbar" method="get" action="{{ url_for('admin_guests') }}" role="search">
+  <input type="search" name="q" value="{{ q }}" placeholder="Search by name, phone or email" aria-label="Search guests">
+  <button type="submit" class="dark">Search</button>
+  {% if q %}<a class="btn ghost" href="{{ url_for('admin_guests') }}">Clear</a>{% endif %}
+  <a class="btn ghost" href="{{ url_for('admin_downloads_csv') }}">Full record for Excel</a>
+</form>
+<p class="hint">{{ "{:,}".format(total) }} guest{{ '' if total == 1 else 's' }}{% if q %} matching "{{ q }}"{% endif %}.</p>
+<div class="card">{% if people %}<div class="scroll"><table>
+<tr><th>Name</th><th>Phone</th><th>Email</th><th>Photos downloaded</th><th>Saved</th><th>Last sign-in</th><th>Last download</th></tr>
+{% for u in people %}<tr><td>{{ u.name }}</td><td>{{ u.phone }}</td><td>{{ u.email }}</td>
+<td>{% if u.n %}<details><summary>{{ u.n }} photos</summary><ul class="files">{% for f in u.files %}<li>{{ f.relpath }}{% if f.album %} <span class="hint">({{ f.album }}, {{ fmt(f.ts) }})</span>{% endif %}</li>{% endfor %}</ul></details>{% else %}0{% endif %}</td>
+<td>{{ u.saved }}</td><td>{{ fmt(u.last_login) }}</td><td>{{ fmt(u.last_dl) }}</td></tr>{% endfor %}
+</table></div>{% else %}<p>{{ "No guest matches this search." if q else "No guest has signed in yet." }}</p>{% endif %}</div>
+{% if pages > 1 %}<nav class="pager" aria-label="Pages">
+{% if page_no > 1 %}<a class="btn ghost small" href="{{ url_for('admin_guests', q=q, page=page_no-1) }}">Previous</a>{% endif %}
+<span>Page {{ page_no }} of {{ pages }}</span>
+{% if page_no < pages %}<a class="btn ghost small" href="{{ url_for('admin_guests', q=q, page=page_no+1) }}">Next</a>{% endif %}
+</nav>{% endif %}
+
+{% elif page == 'brand' %}
+<h1>Look and promotions</h1>
+<form class="card" method="post" action="{{ url_for('admin_brand_save') }}" enctype="multipart/form-data"><input type="hidden" name="csrf" value="{{ csrf }}">
+<h2>Your studio</h2>
+<div class="row"><div><label for="brand">Studio name</label><input id="brand" name="brand" type="text" value="{{ brand }}" maxlength="60" required></div>
+<div><label for="accent">Main colour (buttons, highlights)</label><input id="accent" name="accent" type="color" value="{{ accent }}"></div></div>
+<label for="tagline">Line under the title on the sign-in page</label>
+<input id="tagline" name="tagline" type="text" value="{{ tagline }}" maxlength="140">
+<div class="row">
+<div><label for="logo">Logo (PNG with clear background works best)</label>
+{% if studio.logo %}<img class="preview-logo" src="{{ url_for('brand_logo') }}?v={{ studio.v }}" alt="Current logo">
+<label class="check"><input type="checkbox" name="remove_logo"><span>Remove the logo</span></label>{% endif %}
+<input id="logo" name="logo" type="file" accept="image/*"></div>
+<div><label for="background">Sign-in background picture</label>
+{% if studio.background %}<img class="preview-bg" src="{{ url_for('brand_background') }}?v={{ studio.v }}" alt="Current background">
+<label class="check"><input type="checkbox" name="remove_background"><span>Remove the picture</span></label>{% endif %}
+<input id="background" name="background" type="file" accept="image/*"></div>
+</div>
+<label class="check"><input type="checkbox" name="stamp" {{ 'checked' if stamp }}><span>Put the logo, small, in the top right corner of every downloaded photo. JPG, PNG, WEBP and TIFF are sent as JPG with the logo; RAW and HEIC files are sent unchanged.</span></label>
+<button type="submit">Save look</button>
 </form>
 
-<h2>Google Drive links</h2>
-<div class="card wide">
+<form class="card" method="post" action="{{ url_for('admin_promo_create') }}" enctype="multipart/form-data"><input type="hidden" name="csrf" value="{{ csrf }}">
+<h2>Add a next event or an offer</h2>
+<div class="row"><div><label for="kind">What is it?</label><select id="kind" name="kind"><option value="event">Next event</option><option value="ad">Offer or advertisement</option></select></div>
+<div><label for="pdate">Date (next events hide themselves after this day)</label><input id="pdate" name="event_date" type="date"></div></div>
+<label for="ptitle">Title</label><input id="ptitle" name="title" type="text" maxlength="90" required>
+<label for="pbody">Details</label><textarea id="pbody" name="body" maxlength="400" rows="2"></textarea>
+<div class="row"><div><label for="plinkurl">Link (optional)</label><input id="plinkurl" name="link" type="url" placeholder="https://"></div>
+<div><label for="pimage">Picture (optional)</label><input id="pimage" name="image" type="file" accept="image/*"></div></div>
+<label class="check"><input type="checkbox" name="show_before" checked><span>Show on the sign-in page (before login)</span></label>
+<label class="check"><input type="checkbox" name="show_after" checked><span>Show after login, under the photos</span></label>
+<button type="submit">Add</button>
+</form>
+<div class="card"><h2>Shown to guests</h2>{% if promo_rows %}<div class="scroll"><table>
+<tr><th>Title</th><th>Type</th><th>Date</th><th>Where</th><th></th></tr>
+{% for p in promo_rows %}<tr><td>{{ p.title }}</td><td>{{ "Next event" if p.kind == 'event' else "Offer" }}</td><td>{{ p.event_date or "-" }}</td>
+<td>{{ "Before" if p.show_before }}{{ " and " if p.show_before and p.show_after }}{{ "After" if p.show_after }} login{% if not p.active %} <span class="pill off">Hidden</span>{% endif %}</td>
+<td><form class="inline" method="post" action="{{ url_for('admin_promo_action', pid=p.id, action='toggle') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small ghost">{{ "Hide" if p.active else "Show" }}</button></form>
+<form class="inline" method="post" action="{{ url_for('admin_promo_action', pid=p.id, action='delete') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small danger">Delete</button></form></td></tr>{% endfor %}
+</table></div>{% else %}<p>Nothing yet. Add your next event or an offer above.</p>{% endif %}</div>
+
+{% elif page == 'team' %}
+<h1>Staff</h1>
+<form class="card" method="post" action="{{ url_for('admin_team_create') }}"><input type="hidden" name="csrf" value="{{ csrf }}">
+<h2>Add a staff member</h2>
+<p>Staff can add albums, paste Drive links, scan and test. They cannot see guests, downloads, the look, staff or settings.</p>
+<div class="row"><div><label for="su">User name</label><input id="su" name="username" type="text" autocomplete="off" required pattern="[A-Za-z0-9._\-]{3,30}"></div>
+<div><label for="sp">Password (8 characters or more)</label><input id="sp" name="password" type="password" autocomplete="new-password" minlength="8" required></div></div>
+<button type="submit">Add staff member</button></form>
+<div class="card">{% if staff %}<div class="scroll"><table><tr><th>User name</th><th>Status</th><th>Added</th><th></th></tr>
+{% for u in staff %}<tr><td>{{ u.username }}</td><td><span class="pill {{ 'on' if u.active else 'off' }}">{{ "Can sign in" if u.active else "Blocked" }}</span></td><td>{{ fmt(u.created_at) }}</td>
+<td><form class="inline" method="post" action="{{ url_for('admin_team_action', sid=u.id, action='toggle') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small ghost">{{ "Block" if u.active else "Allow" }}</button></form>
+<form class="inline" method="post" action="{{ url_for('admin_team_action', sid=u.id, action='delete') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small danger">Delete</button></form>
+<details><summary>New password</summary><form method="post" action="{{ url_for('admin_team_action', sid=u.id, action='password') }}"><input type="hidden" name="csrf" value="{{ csrf }}">
+<input name="password" type="password" autocomplete="new-password" minlength="8" required aria-label="New password for {{ u.username }}"><button class="small">Change</button></form></details></td></tr>{% endfor %}
+</table></div>{% else %}<p>No staff yet. You are the only one who can sign in.</p>{% endif %}</div>
+
+{% elif page == 'settings' %}
+<h1>Settings</h1>
+<div class="card"><h2>Google Drive</h2>
 {% if drive_email %}
-<p class="status ready">Connected. You can paste Drive folder links in Step 1. Photos stay on Drive: they are read for scanning and are not saved on this computer.</p>
-<label for="robot">Before pasting a link, share that Drive folder with this email (Viewer is enough)</label>
+<p class="status ready">Connected. Photos stay on Drive: they are read for scanning and are not saved on this computer.</p>
+<label for="robot">Share each Drive folder with this email (Viewer is enough), then paste its link in a new album</label>
 <div class="linkrow"><input id="robot" type="text" readonly value="{{ drive_email }}">
 <button type="button" class="copy nomargin" data-target="robot" data-label="Copy email">Copy email</button></div>
-<p class="hint">In Google Drive: right-click the folder, Share, paste this email, Send. It works for your own folders and for folders where you are an editor. Folders set to "Anyone with the link" work without sharing.</p>
 {% else %}
 <p class="status">Not connected yet. One-time setup, about 5 minutes:</p>
 <ol class="hint">
@@ -61,82 +224,35 @@ For photos that are on Google Drive, use the link (Option A), not the <code>G:</
 <li>Click that account, Keys, Add key, Create new key, JSON. A .json file downloads.</li>
 <li>Upload that file here:</li>
 </ol>
-<form method="post" action="{{ url_for('admin_google_key') }}" enctype="multipart/form-data">
-<input type="hidden" name="csrf" value="{{ csrf }}">
+<form method="post" action="{{ url_for('admin_google_key') }}" enctype="multipart/form-data"><input type="hidden" name="csrf" value="{{ csrf }}">
 <label for="key">Google key file (.json)</label>
 <input id="key" name="key" type="file" accept=".json,application/json" required>
 <button type="submit">Connect Google Drive</button></form>
-{% endif %}
-</div>
+{% endif %}</div>
 
-<h2>Step 2 - Share the link with guests</h2>
-{% if portal_link %}
-<div class="card wide">
-  <div class="bar"><h1>One link for all events</h1><span class="pill">General link</span></div>
-  <label for="plink">Send this single link to everyone</label>
-  <div class="linkrow"><input id="plink" type="text" readonly value="{{ portal_link }}">
-    <button type="button" class="copy nomargin" data-target="plink">Copy link</button></div>
-  <p class="hint">The guest signs in once with email and code, chooses the dates of the events they attended, takes one selfie, and gets their photos from every open album whose date is inside those dates. Albums without a date are not included. If any of those albums has "Ask me first" ON, you approve the request first.</p>
-</div>
-{% endif %}
-{% for e in events %}
-<div class="card wide event">
-  <div class="bar"><h1>{{ e.name }}{% if e.event_date %} <span class="evname">{{ e.event_date }}</span>{% endif %}</h1>
-    <span class="pill {{ 'on' if e.active else 'off' }}">{{ "Link is open" if e.active else "Link is closed" }}</span></div>
-  <p class="status {{ e.state }}" data-eid="{{ e.id }}" data-state="{{ e.state }}">{{ e.status }}</p>
-  <label for="link{{ e.id }}">Guest link - send this on WhatsApp or email</label>
-  <div class="linkrow"><input id="link{{ e.id }}" type="text" readonly value="{{ e.link }}">
-    <button type="button" class="copy nomargin" data-target="link{{ e.id }}">Copy link</button></div>
-  <p class="hint">The guest opens the link, enters their email, types the code from the email, takes a live selfie, and gets only their own photos.</p>
-  <p class="hint">Photos come from:{% for f, up in e.folder_list %} <code>{{ f }}</code>{% if not up %} <b class="off">(drive not connected)</b>{% endif %}{% endfor %}</p>
-  <form class="inline" method="post" action="{{ url_for('admin_event_action', eid=e.id, action='index') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small ghost">Scan again (new photos)</button></form>
-  <form class="inline" method="post" action="{{ url_for('admin_event_action', eid=e.id, action='toggle') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small ghost">{{ "Close link" if e.active else "Open link" }}</button></form>
-  <form class="inline" method="post" action="{{ url_for('admin_event_action', eid=e.id, action='approval') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small ghost">Ask me first: {{ "ON" if e.require_approval else "OFF" }}</button></form>
-  <details class="tester" data-eid="{{ e.id }}" data-csrf="{{ csrf }}"><summary>Test with my own selfie or a photo</summary>
-  <p class="hint">Works like the guest page, but without email or code. You see the scores and the photos a guest with this face would get.</p>
-  <button type="button" class="small t-open">Open camera</button>
-  <div class="cam small-cam" hidden><video autoplay playsinline muted></video></div>
-  <button type="button" class="small t-snap" hidden>Take selfie and test</button>
-  <label for="tp{{ e.id }}">Or choose a clear photo of one person's face</label>
-  <input id="tp{{ e.id }}" class="t-file" type="file" accept="image/*">
-  <p class="status t-result" role="status" hidden></p>
-  <div class="grid t-grid"></div></details>
-  <details><summary>Change the event date{% if not e.event_date %} (no date yet - not in the general link){% endif %}</summary>
-  <form method="post" action="{{ url_for('admin_event_action', eid=e.id, action='date') }}"><input type="hidden" name="csrf" value="{{ csrf }}">
-  <label for="dt{{ e.id }}">Date of the event</label>
-  <input id="dt{{ e.id }}" name="event_date" type="date" value="{{ e.event_date }}"><button class="small">Save date</button></form></details>
-  <details><summary>Add or change folders</summary>
-  <form method="post" action="{{ url_for('admin_event_action', eid=e.id, action='folders') }}"><input type="hidden" name="csrf" value="{{ csrf }}">
-  <label for="fl{{ e.id }}">Folders, one per line</label>
-  <textarea id="fl{{ e.id }}" name="folders" rows="3">{{ e.folders }}</textarea><button class="small">Save and scan</button></form></details>
-</div>
-{% else %}<p class="card wide">No albums yet. Add one in Step 1.</p>{% endfor %}
-
-<h2>Who downloaded photos</h2>
-<div class="card wide">
-<p class="hint">Every guest who signed in, with the photos they downloaded. <a href="{{ url_for('admin_downloads_csv') }}">Download the full record for Excel</a></p>
-{% if people %}<div class="scroll"><table>
-<tr><th>Name</th><th>Phone</th><th>Email</th><th>Photos downloaded</th><th>Saved</th><th>Last download</th></tr>
-{% for u in people %}<tr><td>{{ u.name }}</td><td>{{ u.phone }}</td><td>{{ u.email }}</td>
-<td>{% if u.n %}<details><summary>{{ u.n }} photos</summary><ul class="files">{% for f in u.files %}<li>{{ f.relpath }}{% if f.album %} <span class="hint">({{ f.album }}, {{ fmt(f.ts) }})</span>{% endif %}</li>{% endfor %}</ul></details>{% else %}0{% endif %}</td>
-<td>{{ u.saved }}</td><td>{{ fmt(u.last_dl) if u.last_dl else "-" }}</td></tr>{% endfor %}
-</table></div>{% else %}<p>No guest has signed in yet.</p>{% endif %}
-</div>
-
+<form class="card" method="post" action="{{ url_for('admin_settings') }}"><input type="hidden" name="csrf" value="{{ csrf }}">
 <h2>Match strictness</h2>
-<form class="card wide" method="post" action="{{ url_for('admin_settings') }}">
-<input type="hidden" name="csrf" value="{{ csrf }}">
 <label for="threshold">How alike two faces must be (0.30 to 0.80)</label>
 <input id="threshold" name="threshold" type="number" min="0.30" max="0.80" step="0.01" value="{{ threshold }}" required>
-<p class="hint">Higher = fewer photos of other people, but some of the guest's own photos may be missed. Lower = more photos found, more mistakes. To choose: use "Test with my own selfie" on an album. Each photo shows its score. If a photo of another person appears with score 0.52, set this just above it, for example 0.55. No new scan is needed.</p>
-<button type="submit">Save strictness</button>
-</form>
+<p class="hint">Higher = fewer photos of other people, but some of the guest's own photos may be missed. To choose: use "Test with my own selfie" on an album; each photo shows its score. If another person's photo shows 0.52, set this to 0.55. No new scan is needed.</p>
+<button type="submit">Save strictness</button></form>
 
-<details class="logbox"><summary>Activity log (who got a code, who downloaded)</summary>
-<div class="card wide scroll"><table>
+<form class="card" method="post" action="{{ url_for('admin_settings') }}"><input type="hidden" name="csrf" value="{{ csrf }}">
+<h2>Scan speed and detail</h2>
+<label for="scan_side">How closely each photo is searched for faces</label>
+<select id="scan_side" name="scan_side">
+<option value="1280" {{ 'selected' if scan_side == 1280 }}>Fast - good for most photos</option>
+<option value="1600" {{ 'selected' if scan_side == 1600 }}>Detailed - finds smaller faces in group photos, about a third slower</option>
+<option value="2000" {{ 'selected' if scan_side == 2000 }}>Very detailed - large group photos, about twice as slow as Fast</option></select>
+<p class="hint">Used from the next scan on. Photos already scanned stay as they are.</p>
+<button type="submit">Save scan detail</button></form>
+
+<details class="card"><summary>Activity log (last 200 actions)</summary>
+<div class="scroll"><table>
 <tr><th>Time</th><th>Email</th><th>Action</th><th>Detail</th><th>IP</th></tr>
 {% for a in log %}<tr><td>{{ fmt(a.ts) }}</td><td>{{ a.email or "" }}</td><td>{{ a.action }}</td><td>{{ a.detail }}</td><td>{{ a.ip }}</td></tr>{% endfor %}
 </table></div></details>
-</main>
-<script src="{{ url_for('static', filename='admin.js') }}"></script>
+{% endif %}
+</main></div>
+<script src="{{ url_for('static', filename='admin.js') }}?v=4"></script>
 </body></html>

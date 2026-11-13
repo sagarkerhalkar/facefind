@@ -124,7 +124,8 @@
   const running = () => document.querySelectorAll('.status[data-state="running"]').length > 0;
   async function poll() {
     try {
-      const j = await (await fetch("/admin/status")).json();
+      const ids = [...document.querySelectorAll(".status[data-eid]")].map((el) => el.dataset.eid).join(",");
+      const j = await (await fetch("/admin/status?ids=" + ids)).json();
       let finished = false;
       document.querySelectorAll(".status").forEach((el) => {
         const s = j[el.dataset.eid];
@@ -134,7 +135,7 @@
         el.dataset.state = s.state;
         el.className = "status " + s.state;
       });
-      if (finished) return location.replace("/admin");
+      if (finished) return location.reload();
     } catch (e) { /* app restarting */ }
     if (running()) setTimeout(poll, 2500);
   }

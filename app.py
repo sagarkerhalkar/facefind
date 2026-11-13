@@ -16,11 +16,14 @@ import zipfile
 from pathlib import Path
 from urllib.parse import quote
 
+from werkzeug.exceptions import HTTPException
+
 from flask import (Flask, abort, g, jsonify, redirect, render_template,
                    request, send_file, session, url_for)
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
+import brand
 import config
 import db
 import faces
@@ -46,24 +49,13 @@ if config.TRUST_PROXY:
 db.init()
 
 
-def _load_settings():
-    """Settings changed on the admin page are kept in the database."""
-    c = db.connect()
-    try:
-        v = db.kv_get(c, "match_threshold")
-        if v:
-            config.MATCH_THRESHOLD = float(v)
-    finally:
-        c.close()
-
-
-_load_settings()
+brand.load()
 signer = URLSafeTimedSerializer(config.SECRET_KEY, salt="download")
 EMAIL_RE = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]{2,}")
 DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 PHONE_RE = re.compile(r"\+?\d{7,15}")
 # The general link: not one album, but every open album in the guest's dates.
-PORTAL = {"id": 0, "name": config.BRAND, "code": ""}
+PORTAL = {"id": 0, "name": "", "code": ""}
 COOKIE = "ff_session"
 
 
@@ -136,7 +128,9 @@ def _headers(r):
     r.headers["Permissions-Policy"] = "camera=(self), microphone=(), geolocation=()"
     if not config.DEV_MODE:
         r.headers["Strict-Transport-Security"] = "max-age=31536000"
-    if not request.path.startswith("/static/"):
+    if request.path.startswith("/brand/") and r.status_code == 200:
+        r.headers["Cache-Control"] = "public, max-age=86400"      # addresses carry a version
+    elif not request.path.startswith("/static/"):
         r.headers["Cache-Control"] = "no-store"
     return r
 
@@ -291,15 +285,77 @@ def make_preview(src, dest, ext=""):
     os.replace(tmp, dest)
 
 
+# ------------------------------------------------- studio look and promotions
+@app.context_processor
+def _studio():
+    c = con()
+    return dict(brand=config.BRAND, studio=dict(
+        tagline=brand.get(c, "tagline"), logo=brand.LOGO.exists(),
+        background=brand.BACKGROUND.exists(), v=brand.version() + brand.get(c, "accent")[1:]))
+
+
+def _ink_for(colour):
+    """Black or white text, whichever reads better on this colour."""
+    r, g, b = (int(colour[i:i + 2], 16) for i in (1, 3, 5))
+    return "#16132d" if (0.299 * r + 0.587 * g + 0.114 * b) > 150 else "#ffffff"
+
+
+@app.get("/brand/theme.css")
+def brand_theme():
+    c = con()
+    accent = brand.get(c, "accent")
+    css = f":root{{--accent:{accent};--accent-ink:{_ink_for(accent)};}}\n"
+    if brand.BACKGROUND.exists():
+        css += f".hero{{background-image:linear-gradient(160deg,rgba(22,19,45,.82),rgba(22,19,45,.55)),url(/brand/background?v={brand.version()});}}\n"
+    return app.response_class(css, mimetype="text/css")
+
+
+@app.get("/brand/logo")
+def brand_logo():
+    if not brand.LOGO.exists():
+        abort(404)
+    return send_file(brand.LOGO, mimetype="image/png")
+
+
+@app.get("/brand/background")
+def brand_background():
+    if not brand.BACKGROUND.exists():
+        abort(404)
+    return send_file(brand.BACKGROUND, mimetype="image/jpeg")
+
+
+@app.get("/brand/promo/<int:pid>")
+def brand_promo(pid):
+    f = brand.promo_image(pid)
+    if not f.exists():
+        abort(404)
+    return send_file(f, mimetype="image/jpeg")
+
+
+def promos(where):
+    """Upcoming events and offers to show ('before' or 'after' sign-in).
+    An upcoming event disappears by itself once its date has passed."""
+    rows = con().execute(
+        f"SELECT * FROM promos WHERE active=1 AND show_{where}=1 "
+        "AND (kind<>'event' OR event_date='' OR event_date>=?) "
+        "ORDER BY kind DESC, CASE WHEN event_date='' THEN '9999' ELSE event_date END, id DESC "
+        "LIMIT 12", (time.strftime("%Y-%m-%d"),)).fetchall()
+    return [dict(r, image=brand.promo_image(r["id"]).exists()) for r in rows]
+
+
+def guest_page(status=200, **kw):
+    return render_template("guest.html", promos_before=promos("before"),
+                           promos_after=promos("after"), **kw), status
+
+
 # ------------------------------------------------------------ guest pages
 @app.get("/")
 def home():
     if not config.PORTAL:
-        return render_template("guest.html", brand=config.BRAND, event=None, portal=False), 404
+        return guest_page(404, event=None, portal=False)
     today = time.strftime("%Y-%m-%d")
     month_ago = time.strftime("%Y-%m-%d", time.localtime(time.time() - 30 * 86400))
-    return render_template("guest.html", brand=config.BRAND, event=None, portal=True,
-                           today=today, month_ago=month_ago)
+    return guest_page(event=None, portal=True, today=today, month_ago=month_ago)
 
 
 @app.get("/favicon.ico")
@@ -311,8 +367,8 @@ def favicon():
 def event_page(code):
     ev = event_by_code(code)
     if not ev:
-        return render_template("guest.html", brand=config.BRAND, event=None, portal=False), 404
-    return render_template("guest.html", brand=config.BRAND, event=ev, portal=False)
+        return guest_page(404, event=None, portal=False)
+    return guest_page(event=ev, portal=False)
 
 
 @app.post("/api/otp/send")
@@ -350,7 +406,7 @@ def otp_send():
     db.audit(c, "otp_sent", email, ev["id"], ip=ip())
     c.commit()
     try:
-        mailer.send_otp(email, code, ev["name"])
+        mailer.send_otp(email, code, ev["name"] or config.BRAND)
     except Exception as e:
         app.logger.error("mail failed: %s", e)
         db.audit(c, "mail_failed", email, ev["id"], str(e)[:200], ip())
@@ -580,12 +636,93 @@ def preview(pid):
     return send_file(preview_file(row), mimetype="image/jpeg")
 
 
+def photo_bytes(row):
+    """The original file of one photo, read into memory."""
+    if gdrive.is_drive(row["root"]) and not old_copy(row):
+        if not row["ref"]:
+            raise OSError("no Drive id")
+        return gdrive.fetch_full(row["ref"])
+    p = old_copy(row) or real_path(row["folders"], row["root"], row["relpath"])
+    if p.stat().st_size > config.MAX_PHOTO_BYTES:
+        raise OSError("too large")
+    return p.read_bytes()
+
+
+def with_logo(c, row):
+    """(bytes, file name) of the photo with the studio logo in the top right
+    corner - or None when that is switched off or not possible for this
+    file type; the untouched original is then sent."""
+    name = Path(row["relpath"]).name
+    ext = Path(name).suffix
+    if brand.get(c, "stamp") != "1" or ext.lower() not in brand.STAMPABLE \
+            or not brand.LOGO.exists():
+        return None
+    try:
+        out = brand.stamp(photo_bytes(row), ext)
+    except (OSError, gdrive.DriveError, HTTPException):
+        return None
+    return (out, Path(name).stem + ".jpg") if out else None
+
+
+def zip_download(c, s, rows):
+    """Several photos as one zip file; every photo goes into the record."""
+    tmp = tempfile.SpooledTemporaryFile(max_size=64 * 1024 * 1024)
+    n = 0
+    with zipfile.ZipFile(tmp, "w", zipfile.ZIP_STORED) as z:
+        for r in rows:
+            if r["root"] not in db.split_folders(r["folders"]):
+                continue
+            name = Path(r["relpath"]).name
+            marked = with_logo(c, r)
+            if marked:
+                n += 1
+                z.writestr(f"{n:04d}_{marked[1]}", marked[0])
+            elif old_copy(r):
+                n += 1
+                z.write(old_copy(r), f"{n:04d}_{name}")
+            elif gdrive.is_drive(r["root"]):         # straight from Drive into the zip
+                try:
+                    src = gdrive.open_original(r["ref"])
+                except gdrive.DriveError:
+                    continue
+                n += 1
+                with src, z.open(f"{n:04d}_{name}", "w", force_zip64=True) as dst:
+                    while True:
+                        chunk = src.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        dst.write(chunk)
+            else:
+                base = Path(r["root"])
+                p = base / r["relpath"]
+                if not (p.is_file() and base.resolve() in p.resolve().parents):
+                    continue                         # photos on an offline drive are left out
+                n += 1
+                z.write(p, f"{n:04d}_{name}")
+            record_download(c, s, r)
+    if not n:
+        abort(404)
+    tmp.seek(0)
+    db.audit(c, "download_all", s["email"], s["event_id"] or None, f"{n} photos", ip())
+    c.commit()
+    return send_file(tmp, mimetype="application/zip", as_attachment=True,
+                     download_name="my-photos.zip")
+
+
 @app.post("/api/download-link/<what>")
 def download_link(what):
     s = guest()
     if not s:
         return err("Session expired. Please verify again.", 401)
-    if what == "saved":
+    if what == "selected":                  # the photos the guest ticked
+        ids = (request.get_json(silent=True) or {}).get("ids")
+        if not isinstance(ids, list) or not ids or len(ids) > 2000 \
+                or not all(isinstance(i, int) and allowed(s, i) for i in ids):
+            abort(404)
+        c = con()
+        db.kv_set(c, f"sel:{s['id']}", json.dumps(ids))
+        c.commit()
+    elif what == "saved":
         pass
     elif what != "all":
         if not what.isdigit() or not allowed(s, int(what)):
@@ -607,67 +744,41 @@ def download(token):
     if not s or s["id"] != data.get("s"):
         abort(403)
     c = con()
-    if data["p"] in ("all", "saved"):
-        if data["p"] == "saved":
-            rows = c.execute(
-                "SELECT p.*, e.folders FROM bookmarks b JOIN photos p ON p.id=b.photo_id "
-                "JOIN events e ON e.id=p.event_id WHERE b.email=? AND e.active=1",
-                (s["email"],)).fetchall()
-        else:
-            if s["status"] not in ("matched", "approved"):
-                abort(403)
-            rows = c.execute(
-                "SELECT p.*, e.folders FROM matches m JOIN photos p ON p.id=m.photo_id "
-                "JOIN events e ON e.id=p.event_id WHERE m.session_id=?", (s["id"],)).fetchall()
+    if data["p"] == "selected":
+        ids = json.loads(db.kv_get(c, f"sel:{s['id']}") or "[]")
+        rows = [r for r in (allowed(s, i) for i in ids) if r]
         if not rows:
             abort(404)
-        tmp = tempfile.SpooledTemporaryFile(max_size=64 * 1024 * 1024)
-        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_STORED) as z:
-            n = 0
-            for r in rows:
-                if r["root"] not in db.split_folders(r["folders"]):
-                    continue
-                name = Path(r["relpath"]).name
-                if gdrive.is_drive(r["root"]) and old_copy(r):
-                    n += 1
-                    z.write(old_copy(r), f"{n:04d}_{name}")
-                    record_download(c, s, r)
-                    continue
-                if gdrive.is_drive(r["root"]):       # straight from Drive into the zip
-                    try:
-                        src = gdrive.open_original(r["ref"])
-                    except gdrive.DriveError:
-                        continue
-                    n += 1
-                    with src, z.open(f"{n:04d}_{name}", "w", force_zip64=True) as dst:
-                        while True:
-                            chunk = src.read(1024 * 1024)
-                            if not chunk:
-                                break
-                            dst.write(chunk)
-                    record_download(c, s, r)
-                    continue
-                base = Path(r["root"])
-                p = base / r["relpath"]
-                if p.is_file() and base.resolve() in p.resolve().parents:
-                    n += 1          # photos on an offline drive are left out
-                    z.write(p, f"{n:04d}_{name}")
-                    record_download(c, s, r)
-            if not n:
-                abort(404)
-        tmp.seek(0)
-        db.audit(c, "download_all", s["email"], s["event_id"], f"{n} photos", ip())
-        c.commit()
-        return send_file(tmp, mimetype="application/zip", as_attachment=True,
-                         download_name="my-photos.zip")
+        return zip_download(c, s, rows)
+    if data["p"] == "saved":
+        rows = c.execute(
+            "SELECT p.*, e.folders FROM bookmarks b JOIN photos p ON p.id=b.photo_id "
+            "JOIN events e ON e.id=p.event_id WHERE b.email=? AND e.active=1",
+            (s["email"],)).fetchall()
+        if not rows:
+            abort(404)
+        return zip_download(c, s, rows)
+    if data["p"] == "all":
+        if s["status"] not in ("matched", "approved"):
+            abort(403)
+        rows = c.execute(
+            "SELECT p.*, e.folders FROM matches m JOIN photos p ON p.id=m.photo_id "
+            "JOIN events e ON e.id=p.event_id WHERE m.session_id=?", (s["id"],)).fetchall()
+        if not rows:
+            abort(404)
+        return zip_download(c, s, rows)
     row = allowed(s, int(data["p"]))
     if not row:
         abort(403)
     if row["root"] not in db.split_folders(row["folders"]):
         abort(404)
-    db.audit(c, "download", s["email"], s["event_id"], row["relpath"], ip())
+    db.audit(c, "download", s["email"], s["event_id"] or None, row["relpath"], ip())
     record_download(c, s, row)
     c.commit()
+    marked = with_logo(c, row)
+    if marked:
+        return send_file(io.BytesIO(marked[0]), mimetype="image/jpeg", as_attachment=True,
+                         download_name=marked[1])
     if gdrive.is_drive(row["root"]) and row["ref"]:
         return drive_download(row["ref"], Path(row["relpath"]).name)
     if old_copy(row):
@@ -694,12 +805,31 @@ def forget():
 
 # ------------------------------------------------------------------ admin
 def is_admin():
-    return session.get("admin") is True
+    if session.get("admin") is not True:
+        return False
+    who = session.get("staff")
+    if who:                                 # a staff account must still be active
+        row = con().execute("SELECT active FROM staff WHERE username=?", (who,)).fetchone()
+        return bool(row and row["active"])
+    return True
+
+
+def is_owner():
+    """The owner signs in with the main password; staff can only manage albums."""
+    return is_admin() and not session.get("staff")
 
 
 def admin_post_ok():
     return is_admin() and hmac.compare_digest(
         request.form.get("csrf", ""), session.get("csrf", "x"))
+
+
+def owner_post_ok():
+    return admin_post_ok() and is_owner()
+
+
+def who():
+    return session.get("staff") or "owner"
 
 
 @app.route("/admin/login", methods=["GET", "POST"])
@@ -712,22 +842,32 @@ def admin_login():
         fails = c.execute(
             "SELECT COUNT(*) FROM audit WHERE action='admin_login_fail' AND ip=? AND ts>?",
             (ip(), time.time() - 900)).fetchone()[0]
+        user = request.form.get("username", "").strip().lower()
+        password = request.form.get("password", "")
+        staff = None
         if fails >= 5:
             msg = "Too many attempts. Wait 15 minutes."
-        elif hmac.compare_digest(request.form.get("password", "").encode(),
-                                 config.ADMIN_PASSWORD.encode()):
+        elif user in ("", "admin", "owner"):
+            ok = hmac.compare_digest(password.encode(), config.ADMIN_PASSWORD.encode())
+        else:
+            staff = c.execute("SELECT * FROM staff WHERE username=? AND active=1",
+                              (user,)).fetchone()
+            ok = bool(staff) and brand.check_password(password, staff["salt"], staff["pw_hash"])
+        if not msg and ok:
             session.clear()
             session.permanent = True
             session["admin"] = True
             session["csrf"] = secrets.token_hex(16)
-            db.audit(c, "admin_login", ip=ip())
+            if staff:
+                session["staff"] = staff["username"]
+            db.audit(c, "admin_login", detail=who(), ip=ip())
             c.commit()
             return redirect(url_for("admin"))
-        else:
-            db.audit(c, "admin_login_fail", ip=ip())
+        if not msg:
+            db.audit(c, "admin_login_fail", detail=user, ip=ip())
             c.commit()
-            msg = "Wrong password."
-    return render_template("admin_login.html", brand=config.BRAND, msg=msg)
+            msg = "Wrong user name or password."
+    return render_template("admin_login.html", msg=msg)
 
 
 @app.post("/admin/logout")
@@ -736,13 +876,47 @@ def admin_logout():
     return redirect(url_for("admin_login"))
 
 
+def fmt_time(t):
+    return time.strftime("%d %b %Y %H:%M", time.localtime(t)) if t else "-"
+
+
+def admin_page(page, **kw):
+    return render_template(
+        "admin.html", page=page, csrf=session["csrf"], owner=is_owner(), who=who(),
+        msg=request.args.get("msg", ""), fmt=fmt_time, today=time.strftime("%Y-%m-%d"), **kw)
+
+
+def paging(total, per):
+    """Current page number, number of pages, row offset."""
+    pages = max(1, -(-total // per))
+    page = min(pages, max(1, request.args.get("page", 1, type=int) or 1))
+    return page, pages, (page - 1) * per
+
+
+ALBUMS_PER_PAGE, GUESTS_PER_PAGE = 20, 30
+
+
 @app.get("/admin")
 def admin():
+    """Albums: search, 20 per page - works the same with ten albums or lakhs."""
     if not is_admin():
         return redirect(url_for("admin_login"))
     c = con()
+    q = request.args.get("q", "").strip()[:80]
+    show = request.args.get("show", "")
+    where, args = [], []
+    if q:
+        where.append("(name LIKE ? OR event_date LIKE ?)")
+        args += [f"%{q}%", f"%{q}%"]
+    if show in ("open", "closed"):
+        where.append("active=?")
+        args.append(1 if show == "open" else 0)
+    sql = (" WHERE " + " AND ".join(where)) if where else ""
+    total = c.execute("SELECT COUNT(*) FROM events" + sql, args).fetchone()[0]
+    page, pages, offset = paging(total, ALBUMS_PER_PAGE)
     events = []
-    for e in c.execute("SELECT * FROM events ORDER BY id DESC"):
+    for e in c.execute("SELECT * FROM events" + sql + " ORDER BY id DESC LIMIT ? OFFSET ?",
+                       args + [ALBUMS_PER_PAGE, offset]).fetchall():
         e = dict(e)
         e["photos"] = c.execute("SELECT COUNT(*) FROM photos WHERE event_id=?", (e["id"],)).fetchone()[0]
         e["faces"] = c.execute("SELECT COUNT(*) FROM faces WHERE event_id=?", (e["id"],)).fetchone()[0]
@@ -750,33 +924,200 @@ def admin():
         e["folder_list"] = [(gdrive.label(f), gdrive.is_drive(f) or Path(f).is_dir())
                             for f in db.split_folders(e["folders"])]
         e["link"] = guest_link(e["code"])
+        e["errors"] = c.execute("SELECT relpath, reason FROM scan_errors WHERE event_id=? LIMIT 200",
+                                (e["id"],)).fetchall()
+        e["n_errors"] = c.execute("SELECT COUNT(*) FROM scan_errors WHERE event_id=?",
+                                  (e["id"],)).fetchone()[0]
         events.append(e)
     pending = c.execute(
         "SELECT s.id, s.email, s.created_at, s.date_from, s.date_to, "
         "COALESCE(e.name, 'General link') AS name, "
         "(SELECT COUNT(*) FROM matches m WHERE m.session_id=s.id) AS n "
         "FROM sessions s LEFT JOIN events e ON e.id=s.event_id "
-        "WHERE s.status='pending' AND s.expires_at>? ORDER BY s.id", (time.time(),)).fetchall()
-    log = c.execute("SELECT * FROM audit ORDER BY id DESC LIMIT 150").fetchall()
+        "WHERE s.status='pending' AND s.expires_at>? ORDER BY s.id LIMIT 50", (time.time(),)).fetchall()
+    totals = dict(albums=c.execute("SELECT COUNT(*) FROM events").fetchone()[0],
+                  photos=c.execute("SELECT COUNT(*) FROM photos").fetchone()[0],
+                  guests=c.execute("SELECT COUNT(*) FROM users").fetchone()[0],
+                  downloads=c.execute("SELECT COUNT(*) FROM downloads").fetchone()[0])
+    return admin_page("albums", events=events, pending=pending, totals=totals, q=q, show=show,
+                      total=total, page_no=page, pages=pages,
+                      portal_link=guest_link("") if config.PORTAL else "",
+                      drive_email=gdrive.robot_email())
+
+
+@app.get("/admin/guests")
+def admin_guests():
+    """Everyone who signed in and what they downloaded - searchable, in pages."""
+    if not is_owner():
+        return redirect(url_for("admin"))
+    c = con()
+    q = request.args.get("q", "").strip()[:80]
+    sql, args = "", []
+    if q:
+        sql, args = " WHERE name LIKE ? OR phone LIKE ? OR email LIKE ?", [f"%{q}%"] * 3
+    total = c.execute("SELECT COUNT(*) FROM users" + sql, args).fetchone()[0]
+    page, pages, offset = paging(total, GUESTS_PER_PAGE)
     people = []
     for u in c.execute(
             "SELECT u.email, u.name, u.phone, u.last_login, "
             "(SELECT COUNT(DISTINCT photo_id) FROM downloads d WHERE d.email=u.email) AS n, "
             "(SELECT MAX(ts) FROM downloads d WHERE d.email=u.email) AS last_dl, "
             "(SELECT COUNT(*) FROM bookmarks b WHERE b.email=u.email) AS saved "
-            "FROM users u ORDER BY COALESCE(last_dl, 0) DESC, u.last_login DESC LIMIT 300").fetchall():
+            "FROM users u" + sql + " ORDER BY u.last_login DESC LIMIT ? OFFSET ?",
+            args + [GUESTS_PER_PAGE, offset]).fetchall():
         u = dict(u)
         u["files"] = c.execute(
             "SELECT d.relpath, MAX(d.ts) AS ts, COALESCE(e.name, '') AS album FROM downloads d "
             "LEFT JOIN events e ON e.id=d.event_id WHERE d.email=? "
-            "GROUP BY d.photo_id, d.relpath ORDER BY ts DESC LIMIT 200", (u["email"],)).fetchall()
+            "GROUP BY d.photo_id, d.relpath ORDER BY ts DESC LIMIT 100", (u["email"],)).fetchall()
         people.append(u)
-    return render_template("admin.html", brand=config.BRAND, events=events, pending=pending,
-                           log=log, csrf=session["csrf"], people=people,
-                           threshold=f"{config.MATCH_THRESHOLD:.2f}",
-                           portal_link=guest_link("") if config.PORTAL else "",
-                           today=time.strftime("%Y-%m-%d"), drive_email=gdrive.robot_email(), msg=request.args.get("msg", ""),
-                           fmt=lambda t: time.strftime("%d %b %H:%M", time.localtime(t)))
+    return admin_page("guests", people=people, q=q, total=total, page_no=page, pages=pages)
+
+
+@app.get("/admin/brand")
+def admin_brand():
+    if not is_owner():
+        return redirect(url_for("admin"))
+    c = con()
+    rows = [dict(r, image=brand.promo_image(r["id"]).exists())
+            for r in c.execute("SELECT * FROM promos ORDER BY id DESC LIMIT 100")]
+    return admin_page("brand", promo_rows=rows, accent=brand.get(c, "accent"),
+                      tagline=brand.get(c, "tagline"), stamp=brand.get(c, "stamp") == "1")
+
+
+@app.post("/admin/brand")
+def admin_brand_save():
+    if not owner_post_ok():
+        abort(403)
+    c, f, notes = con(), request.form, []
+    name = " ".join(f.get("brand", "").split())[:60]
+    if name:
+        brand.put(c, "brand", name)
+        config.BRAND = name
+    brand.put(c, "tagline", " ".join(f.get("tagline", "").split())[:140] or None)
+    if brand.COLOUR_RE.fullmatch(f.get("accent", "")):
+        brand.put(c, "accent", f["accent"])
+    brand.put(c, "stamp", "1" if f.get("stamp") else "0")
+    for field, dest, side in (("logo", brand.LOGO, 600), ("background", brand.BACKGROUND, 2400)):
+        if f.get("remove_" + field):
+            dest.unlink(missing_ok=True)
+        up = request.files.get(field)
+        if up and up.filename:
+            try:
+                brand.save_image(up, dest, side)
+            except ValueError as e:
+                notes.append(f"{field.capitalize()}: {e}")
+    if f.get("stamp") and not brand.LOGO.exists():
+        notes.append("Upload a logo first - without one, downloads are sent unchanged.")
+    db.audit(c, "branding_changed", detail=who(), ip=ip())
+    c.commit()
+    return redirect(url_for("admin_brand", msg=" ".join(notes) or "Saved. Guests see the new look now."))
+
+
+@app.post("/admin/promos")
+def admin_promo_create():
+    if not owner_post_ok():
+        abort(403)
+    c, f = con(), request.form
+    title = " ".join(f.get("title", "").split())[:90]
+    link = f.get("link", "").strip()[:300]
+    date = f.get("event_date", "").strip()
+    if not title:
+        return redirect(url_for("admin_brand", msg="Not added. Type a title."))
+    if link and not re.match(r"https?://", link):
+        return redirect(url_for("admin_brand", msg="Not added. The link must start with https://"))
+    pid = c.execute(
+        "INSERT INTO promos(kind,title,body,link,event_date,show_before,show_after,created_at) "
+        "VALUES(?,?,?,?,?,?,?,?)",
+        ("event" if f.get("kind") == "event" else "ad", title, f.get("body", "").strip()[:400],
+         link, date if DATE_RE.fullmatch(date) else "", 1 if f.get("show_before") else 0,
+         1 if f.get("show_after") else 0, time.time())).lastrowid
+    c.commit()
+    up, note = request.files.get("image"), ""
+    if up and up.filename:
+        try:
+            brand.save_image(up, brand.promo_image(pid), 1400)
+        except ValueError as e:
+            note = f" Picture not used: {e}"
+    return redirect(url_for("admin_brand", msg="Added." + note))
+
+
+@app.post("/admin/promos/<int:pid>/<action>")
+def admin_promo_action(pid, action):
+    if not owner_post_ok():
+        abort(403)
+    c = con()
+    if action == "toggle":
+        c.execute("UPDATE promos SET active=1-active WHERE id=?", (pid,))
+    elif action == "delete":
+        c.execute("DELETE FROM promos WHERE id=?", (pid,))
+        brand.promo_image(pid).unlink(missing_ok=True)
+    else:
+        abort(404)
+    c.commit()
+    return redirect(url_for("admin_brand"))
+
+
+@app.get("/admin/team")
+def admin_team():
+    if not is_owner():
+        return redirect(url_for("admin"))
+    return admin_page("team", staff=con().execute("SELECT * FROM staff ORDER BY username").fetchall())
+
+
+@app.post("/admin/team")
+def admin_team_create():
+    if not owner_post_ok():
+        abort(403)
+    user = request.form.get("username", "").strip().lower()
+    password = request.form.get("password", "")
+    if not re.fullmatch(r"[a-z0-9._-]{3,30}", user) or user in ("admin", "owner"):
+        return redirect(url_for("admin_team", msg="Not added. User name: 3-30 letters, digits, dot, dash."))
+    if len(password) < 8:
+        return redirect(url_for("admin_team", msg="Not added. The password needs at least 8 characters."))
+    c = con()
+    if c.execute("SELECT 1 FROM staff WHERE username=?", (user,)).fetchone():
+        return redirect(url_for("admin_team", msg="Not added. That user name is already taken."))
+    salt, digest = brand.hash_password(password)
+    c.execute("INSERT INTO staff(username,salt,pw_hash,created_at) VALUES(?,?,?,?)",
+              (user, salt, digest, time.time()))
+    db.audit(c, "staff_added", detail=user, ip=ip())
+    c.commit()
+    return redirect(url_for("admin_team", msg=f"{user} can now sign in and manage albums."))
+
+
+@app.post("/admin/team/<int:sid>/<action>")
+def admin_team_action(sid, action):
+    if not owner_post_ok():
+        abort(403)
+    c, msg = con(), ""
+    if action == "toggle":
+        c.execute("UPDATE staff SET active=1-active WHERE id=?", (sid,))
+    elif action == "delete":
+        c.execute("DELETE FROM staff WHERE id=?", (sid,))
+    elif action == "password":
+        password = request.form.get("password", "")
+        if len(password) < 8:
+            msg = "Not changed. The password needs at least 8 characters."
+        else:
+            salt, digest = brand.hash_password(password)
+            c.execute("UPDATE staff SET salt=?, pw_hash=? WHERE id=?", (salt, digest, sid))
+            msg = "Password changed."
+    else:
+        abort(404)
+    db.audit(c, "staff_" + action, detail=str(sid), ip=ip())
+    c.commit()
+    return redirect(url_for("admin_team", msg=msg))
+
+
+@app.get("/admin/settings")
+def admin_settings_page():
+    if not is_owner():
+        return redirect(url_for("admin"))
+    c = con()
+    return admin_page("settings", threshold=f"{config.MATCH_THRESHOLD:.2f}",
+                      scan_side=config.SCAN_SIDE, drive_email=gdrive.robot_email(),
+                      log=c.execute("SELECT * FROM audit ORDER BY id DESC LIMIT 200").fetchall())
 
 
 def status_text(eid, photos, faces):
@@ -823,21 +1164,25 @@ def status_text(eid, photos, faces):
 
 @app.get("/admin/status")
 def admin_status():
+    """Live scan status of the albums on the page (ids=1,2,3)."""
     if not is_admin():
         abort(403)
     c, out = con(), {}
-    for e in c.execute("SELECT id FROM events"):
-        n = c.execute("SELECT COUNT(*) FROM photos WHERE event_id=?", (e["id"],)).fetchone()[0]
-        f = c.execute("SELECT COUNT(*) FROM faces WHERE event_id=?", (e["id"],)).fetchone()[0]
-        text, state = status_text(e["id"], n, f)
-        out[e["id"]] = dict(text=text, state=state)
+    ids = [int(x) for x in request.args.get("ids", "").split(",") if x.isdigit()][:50]
+    if not ids:
+        ids = [r[0] for r in c.execute("SELECT id FROM events ORDER BY id DESC LIMIT 50")]
+    for eid in ids:
+        n = c.execute("SELECT COUNT(*) FROM photos WHERE event_id=?", (eid,)).fetchone()[0]
+        f = c.execute("SELECT COUNT(*) FROM faces WHERE event_id=?", (eid,)).fetchone()[0]
+        text, state = status_text(eid, n, f)
+        out[eid] = dict(text=text, state=state)
     return jsonify(out)
 
 
 @app.get("/admin/downloads.csv")
 def admin_downloads_csv():
     """The whole download record as a file that opens in Excel."""
-    if not is_admin():
+    if not is_owner():
         abort(403)
     import csv
     out = io.StringIO()
@@ -858,20 +1203,29 @@ def admin_downloads_csv():
 
 @app.post("/admin/settings")
 def admin_settings():
-    if not admin_post_ok():
+    if not owner_post_ok():
         abort(403)
+    back = lambda m: redirect(url_for("admin_settings_page", msg=m))     # noqa: E731
+    c = con()
+    side = request.form.get("scan_side", "")
+    if side:
+        if side not in ("1280", "1600", "2000"):
+            return back("Not saved.")
+        brand.put(c, "scan_side", side)
+        config.SCAN_SIDE = config.DRIVE_SCAN_SIDE = int(side)
+        c.commit()
+        return back("Scan detail saved. It is used from the next scan on.")
     try:
         v = float(request.form.get("threshold", ""))
         assert 0.30 <= v <= 0.80
     except (ValueError, AssertionError):
-        return redirect(url_for("admin", msg="Not saved. Strictness must be between 0.30 and 0.80."))
-    c = con()
+        return back("Not saved. Strictness must be between 0.30 and 0.80.")
     db.kv_set(c, "match_threshold", f"{v:.3f}")
     db.audit(c, "strictness_changed", detail=f"{v:.2f}", ip=ip())
     c.commit()
     config.MATCH_THRESHOLD = v
-    return redirect(url_for("admin", msg=f"Match strictness is now {v:.2f}. It applies to the "
-                                         "next selfie - no new scan is needed."))
+    return back(f"Match strictness is now {v:.2f}. It applies to the next selfie - "
+                "no new scan is needed.")
 
 
 @app.get("/admin/browse")
@@ -923,6 +1277,7 @@ def admin_event_create():
         (name, secrets.token_urlsafe(9), "\n".join(folders),
          1 if request.form.get("approval") else 0, time.time(),
          date if DATE_RE.fullmatch(date) else "")).lastrowid
+    db.audit(c, "album_created", detail=f"{name} | by {who()}", ip=ip())
     c.commit()
     indexer.start_index(eid)
     return redirect(url_for("admin", msg="Album created. The photos are being scanned now."))
@@ -960,7 +1315,7 @@ def _clean_folders(text):
 @app.post("/admin/google-key")
 def admin_google_key():
     """Upload of the Google key file that lets the app read Drive links."""
-    if not admin_post_ok():
+    if not owner_post_ok():
         abort(403)
     up = request.files.get("key")
     try:
@@ -968,7 +1323,7 @@ def admin_google_key():
         assert d["type"] == "service_account" and d["client_email"] and d["private_key"]
         gdrive.make_assertion(d)             # the key inside must be usable
     except Exception:
-        return redirect(url_for("admin", msg="That is not the right file. Upload the .json key "
+        return redirect(url_for("admin_settings_page", msg="That is not the right file. Upload the .json key "
                                              "file downloaded from Google Cloud."))
     config.GOOGLE_KEY.write_text(json.dumps(d), encoding="utf-8")
     try:
@@ -978,7 +1333,7 @@ def admin_google_key():
     gdrive._token.update(value=None, exp=0)
     db.audit(con(), "google_key_uploaded", ip=ip())
     con().commit()
-    return redirect(url_for("admin", msg="Google Drive connected. Share your Drive folders with "
+    return redirect(url_for("admin_settings_page", msg="Google Drive connected. Share your Drive folders with "
                                          + d["client_email"] + " and paste their links."))
 
 
@@ -1018,7 +1373,8 @@ def admin_event_action(eid, action):
     else:
         abort(404)
     c.commit()
-    return redirect(url_for("admin", msg=msg))
+    return redirect(url_for("admin", msg=msg, q=request.form.get("q", ""),
+                            page=request.form.get("page", "1")))
 
 
 def _test_message(eid, img):

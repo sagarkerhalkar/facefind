@@ -165,6 +165,7 @@ def index_event(event_id):
     try:
         ev = con.execute("SELECT * FROM events WHERE id=?", (event_id,)).fetchone()
         db.kv_set(con, f"scanning:{event_id}", "1")
+        con.execute("DELETE FROM scan_errors WHERE event_id=?", (event_id,))
         con.commit()
         faces.get_engine()                      # fail early if the models are broken
         roots = db.split_folders(ev["folders"])
@@ -211,6 +212,9 @@ def index_event(event_id):
                     if vecs is None:
                         st["bad_count"] += 1
                         st["bad"] = f"{job['rel']}: {problem}"
+                        con.execute("INSERT INTO scan_errors(event_id,relpath,reason) VALUES(?,?,?)",
+                                    (event_id, f"{gdrive.label(job['root'])} / {job['rel']}",
+                                     problem))
                         continue
                     key = (job["root"], job["rel"])
                     if key in known:
@@ -244,7 +248,8 @@ def index_event(event_id):
                          + (f" (it has {seen}, which are not photos)." if seen
                             else ". Check that you chose the folder that holds the photos."))
         if st["bad_count"]:
-            notes.append(f"{st['bad_count']} files could not be read (last: {st['bad']}).")
+            notes.append(f"{st['bad_count']} files could not be read (last: {st['bad']}). "
+                         "The full list is under 'Files that were not scanned'.")
         db.kv_set(con, f"scanning:{event_id}", None)
         con.commit()
         for r in roots:

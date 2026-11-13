@@ -6,7 +6,16 @@
   const $ = (id) => document.getElementById(id);
   const sections = ["step-email", "step-otp", "step-events", "step-selfie", "step-pending", "step-gallery"];
   let email = "", stream = null, pollTimer = null, chosen = null, last = null;
-  const saved = new Set();
+  const saved = new Set(), picked = new Set();
+
+  // the stack of prints leans towards the pointer (the one 3D moment)
+  const prints = $("prints");
+  if (prints && window.matchMedia("(hover:hover) and (prefers-reduced-motion:no-preference)").matches) {
+    document.addEventListener("pointermove", (e) => {
+      prints.style.setProperty("--tx", (e.clientX / window.innerWidth - 0.5).toFixed(3));
+      prints.style.setProperty("--ty", (e.clientY / window.innerHeight - 0.5).toFixed(3));
+    }, { passive: true });
+  }
 
   async function api(path, body) {
     const opt = body === undefined ? {} : {
@@ -36,6 +45,11 @@
     [1, 2, 3, 4].forEach((n) => $("s" + n).classList.toggle("on", n <= stepNo));
     if (id !== "step-selfie") stopCam();
     clearTimeout(pollTimer);
+    // signed in: the big sign-in stage folds away, offers appear under the content
+    const inside = stepNo >= 3;
+    document.body.classList.toggle("in", inside);
+    $("after").hidden = !inside;
+    if (id !== "step-gallery") { picked.clear(); paintTray(); }
   }
 
   function busy(btn, on) { btn.disabled = on; }
@@ -98,6 +112,9 @@
       list.append(label);
     });
     $("ev-box").hidden = r.events.length === 0;
+    $("ev-count").textContent = r.events.length + (r.events.length === 1 ? " event" : " events") + " in these dates";
+    const many = r.events.length > 8;          // long lists get a search box
+    $("ev-filter").hidden = !many; $("ev-filter-label").hidden = !many; $("ev-filter").value = "";
     $("ev-next").hidden = r.events.length === 0;
     if (!r.events.length) say("There is no event in these dates. Please check the dates, or ask the photographer.");
   }
@@ -106,12 +123,16 @@
     $("d-from").addEventListener("change", () => { $("ev-box").hidden = true; $("ev-next").hidden = true; });
     $("d-to").addEventListener("change", () => { $("ev-box").hidden = true; $("ev-next").hidden = true; });
     $("ev-next").addEventListener("click", () => {
-      chosen = [...$("ev-list").querySelectorAll("input:checked")].map((b) => Number(b.value));
+      chosen = [...$("ev-list").querySelectorAll("label:not([hidden]) input:checked")].map((b) => Number(b.value));
       if (!chosen.length) return say("Please tick at least one event.");
       say("");
       startSelfie();
     });
     $("ev-saved").addEventListener("click", showSaved);
+    $("ev-filter").addEventListener("input", (e) => {
+      const q = e.target.value.trim().toLowerCase();
+      $("ev-list").querySelectorAll("label").forEach((l) => { l.hidden = !!q && !l.textContent.toLowerCase().includes(q); });
+    });
   }
 
   // ---- step 3b: selfie
@@ -196,6 +217,8 @@
     $("show-saved").hidden = mode === "saved";
     $("show-saved").textContent = "My saved photos (" + saved.size + ")";
     $("show-found").hidden = !(mode === "saved" && last);
+    $("g-hint").hidden = n === 0;
+    picked.clear(); paintTray();
     const grid = $("grid");
     grid.textContent = "";
     const named = portal || groups.length > 1 || mode === "saved";
@@ -217,6 +240,14 @@
     img.alt = "Preview of your photo";
     img.src = "/api/preview/" + id;
     img.addEventListener("error", () => { img.alt = "This photo cannot be shown right now"; }, { once: true });
+    const pick = document.createElement("input");
+    pick.type = "checkbox"; pick.className = "pick";
+    pick.setAttribute("aria-label", "Select this photo for download");
+    pick.addEventListener("change", () => {
+      if (pick.checked) picked.add(id); else picked.delete(id);
+      fig.classList.toggle("picked", pick.checked);
+      paintTray();
+    });
     const row = document.createElement("div");
     row.className = "acts";
     const keep = document.createElement("button");
@@ -240,9 +271,28 @@
     b.textContent = "Download";
     b.addEventListener("click", () => download(id, b));
     row.append(keep, b);
-    fig.append(img, row);
+    fig.append(img, pick, row);
     return fig;
   }
+
+  // ---- several photos ticked: one download
+  function paintTray() {
+    $("tray").hidden = picked.size === 0;
+    $("tray-count").textContent = picked.size + (picked.size === 1 ? " photo selected" : " photos selected");
+  }
+  $("tray-clear").addEventListener("click", () => {
+    picked.clear();
+    $("grid").querySelectorAll(".pick").forEach((b) => { b.checked = false; });
+    $("grid").querySelectorAll("figure.picked").forEach((f) => f.classList.remove("picked"));
+    paintTray();
+  });
+  $("tray-dl").addEventListener("click", async (e) => {
+    busy(e.target, true); say("");
+    const r = await api("/api/download-link/selected", { ids: [...picked] });
+    busy(e.target, false);
+    if (!r.ok) return say(r.error || "Could not start the download. Please sign in again.");
+    window.location.assign(r.url);
+  });
 
   async function showSaved() {
     say("");

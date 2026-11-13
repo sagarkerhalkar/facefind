@@ -50,6 +50,20 @@ and open at the next sign-in without a new selfie. The admin page lists
 full record as a file for Excel. **Match strictness** on the admin page sets
 how alike two faces must be; use "Test with my own selfie" to see the scores.
 
+## Admin sections
+
+- **Albums** - add albums, search by name or date, 20 per page; each album
+  opens to show its link, scan status, files that were not scanned, the
+  selfie test and its folders.
+- **Guests and downloads** - who signed in and which photos they took;
+  search by name, phone or email; full record for Excel.
+- **Look and promotions** - studio name, colour, logo, sign-in background,
+  logo on downloaded photos, next events and offers (before / after sign-in).
+- **Staff** - user names and passwords for helpers. Staff can add and scan
+  albums only. The owner signs in with the `.env` password and an empty
+  user name.
+- **Settings** - Google Drive, match strictness, scan detail, activity log.
+
 ## Photos from many drives
 
 When you create an event, type one folder per line – from as many drives as
