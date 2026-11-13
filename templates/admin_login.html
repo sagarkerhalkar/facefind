@@ -1,12 +1,21 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Admin sign in - {{ brand }}</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"></head>
-<body><header><span class="brand">{{ brand }}</span><span class="evname">Admin</span></header>
-<main>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#16132d">
+<title>Staff sign in - {{ brand }}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=4">
+<link rel="stylesheet" href="{{ url_for('brand_theme') }}?v={{ studio.v }}">
+</head>
+<body><div class="login-wrap"><section class="card">
+<span class="mark">{% if studio.logo %}<img src="{{ url_for('brand_logo') }}?v={{ studio.v }}" alt="{{ brand }}">{% else %}{{ brand }}{% endif %}</span>
+<h1>Staff sign in</h1>
 {% if msg %}<p class="msg" role="alert">{{ msg }}</p>{% endif %}
-<section class="card"><h1>Admin sign in</h1>
-<form method="post"><label for="password">Password</label>
+<form method="post">
+<label for="username">User name</label>
+<input id="username" name="username" type="text" autocomplete="username" placeholder="Leave empty if you are the owner">
+<label for="password">Password</label>
 <input id="password" name="password" type="password" autocomplete="current-password" required>
-<button type="submit">Sign in</button></form></section>
-</main></body></html>
+<button type="submit" class="wide">Sign in</button></form></section></div>
+</body></html>

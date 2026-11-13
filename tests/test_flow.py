@@ -346,8 +346,9 @@ con.execute("DELETE FROM otps"); con.commit(); sent.clear(); u3 = A.app.test_cli
 assert u3.get(f"/api/preview/{mine1}").status_code == 404 and u3.get("/api/bookmarks").json["groups"] == []
 assert u2.post(f"/api/bookmark/{mine1}", json={"on": False}, headers=H).json["on"] is False
 assert u2.get(f"/api/preview/{mine1}").status_code == 404           # un-saved and no selfie this visit
-apage = adm.get("/admin").data.decode()
-assert "Who downloaded photos" in apage and "Test Guest" in apage and "9876543210" in apage and "u1@x.com" in apage
+apage = adm.get("/admin/guests").data.decode()
+assert "Guests and downloads" in apage and "Test Guest" in apage and "9876543210" in apage and "u1@x.com" in apage
+assert "u1@x.com" in adm.get("/admin/guests?q=u1@").data.decode() and "u1@x.com" not in adm.get("/admin/guests?q=nobody").data.decode()
 csvt = adm.get("/admin/downloads.csv").get_data(as_text=True)
 assert "Test Guest,9876543210,u1@x.com,Haldi," in csvt and A.app.test_client().get("/admin/downloads.csv").status_code == 403
 assert con.execute("SELECT COUNT(*) FROM downloads WHERE email='u1@x.com'").fetchone()[0] == 2    # one single + one in the zip
@@ -376,6 +377,108 @@ assert con.execute("SELECT COUNT(*) FROM faces WHERE event_id=?", (fev["id"],)).
 for (fp,) in con.execute("SELECT id FROM photos WHERE event_id=?", (fev["id"],)).fetchall():
     pr = adm.get(f"/admin/photo/{fp}"); assert pr.status_code == 200 and pr.mimetype == "image/jpeg", pr.data
 print(f"ok  RAW{' and HEIC' if kinds == 2 else ''} photos are scanned and previewed")
+
+# several ticked photos in one download
+con.execute("DELETE FROM otps"); con.commit(); sent.clear()
+keep5 = code; code = ""; m1 = A.app.test_client(); login(m1, "multi@x.com")
+both = m1.post("/api/selfie", json={"image": img(RED), "date_from": "2026-11-01", "date_to": "2026-11-30"}, headers=H).json["photos"]
+assert len(both) == 2
+assert m1.post("/api/download-link/selected", json={"ids": both + [blue_h]}, headers=H).status_code == 404     # not all are the guest's
+assert m1.post("/api/download-link/selected", json={"ids": []}, headers=H).status_code == 404
+zsel = m1.get(m1.post("/api/download-link/selected", json={"ids": both[:1]}, headers=H).json["url"])
+assert len(zipfile.ZipFile(io.BytesIO(zsel.data)).namelist()) == 1
+code = keep5
+print("ok  several ticked photos download as one zip, only the guest's own")
+
+# studio look: name, colour, logo, background; logo on downloaded photos
+import brand as B
+def png_file(color, size=(300, 120)):
+    b = io.BytesIO(); Image.new("RGBA", size, color + (255,)).save(b, "PNG"); b.seek(0); return b
+assert A.app.test_client().get("/brand/logo").status_code == 404
+sv = adm.post("/admin/brand", data={"csrf": csrf, "brand": "Kerhalkar Studio", "tagline": "Hello guests", "accent": "#0A7E8C", "stamp": "on",
+                                    "logo": (png_file((0, 255, 0)), "logo.png"), "background": (png_file((9, 9, 9), (800, 600)), "bg.png")},
+              content_type="multipart/form-data")
+assert sv.status_code == 302 and config.BRAND == "Kerhalkar Studio" and B.LOGO.exists() and B.BACKGROUND.exists()
+pub = A.app.test_client()
+assert pub.get("/brand/logo").mimetype == "image/png" and pub.get("/brand/background").mimetype == "image/jpeg"
+css = pub.get("/brand/theme.css").get_data(as_text=True); assert "--accent:#0A7E8C" in css and "/brand/background" in css
+hp = pub.get("/").get_data(as_text=True); assert "Hello guests" in hp and "/brand/logo" in hp and "Kerhalkar Studio" in hp
+assert adm.post("/admin/brand", data={"csrf": csrf, "brand": "Kerhalkar Studio", "stamp": "on", "accent": "#0A7E8C", "logo": (io.BytesIO(b"not a picture"), "a.png")},
+                content_type="multipart/form-data", follow_redirects=True).data.count(b"not a picture") == 1
+assert A.app.test_client().post("/admin/brand", data={"brand": "Hack"}).status_code == 403
+got = m1.get(m1.post(f"/api/download-link/{both[0]}", json={}, headers=H).json["url"])
+marked = Image.open(io.BytesIO(got.data)).convert("RGB")
+assert got.mimetype == "image/jpeg" and ".jpg" in got.headers["Content-Disposition"], got.headers
+w_, h_ = marked.size; px = marked.getpixel((w_ - int(max(marked.size) * 0.018) - 12, int(max(marked.size) * 0.018) + 6))
+assert px[1] > 200 and px[0] < 80, px                                 # the green logo sits top right
+assert marked.getpixel((10, h_ - 10))[0] > 200                        # the rest is still the red photo
+adm.post("/admin/brand", data={"csrf": csrf, "brand": "Test Studio", "accent": "#E8A317"})        # logo on downloads off again
+plain = m1.get(m1.post(f"/api/download-link/{both[0]}", json={}, headers=H).json["url"]); assert plain.mimetype == "image/png"
+print("ok  studio name, colour, logo and background change; logo is put on downloaded photos when switched on")
+
+# next events and offers, before and after sign-in
+adm.post("/admin/promos", data={"csrf": csrf, "kind": "event", "title": "Diwali Mela shoot", "body": "Stall 4", "event_date": "2099-10-20",
+                                "show_before": "on", "image": (png_file((1, 2, 3), (640, 360)), "p.png")}, content_type="multipart/form-data")
+adm.post("/admin/promos", data={"csrf": csrf, "kind": "ad", "title": "Album printing offer", "link": "https://example.com/offer", "show_after": "on"})
+adm.post("/admin/promos", data={"csrf": csrf, "kind": "event", "title": "Past event", "event_date": "2020-01-01", "show_before": "on", "show_after": "on"})
+assert b"Not added" in adm.post("/admin/promos", data={"csrf": csrf, "title": "Bad", "link": "javascript:alert(1)"}, follow_redirects=True).data
+hp = pub.get("/").get_data(as_text=True)
+before, after = hp.split('id="after"')
+assert "Diwali Mela shoot" in before and "Album printing offer" not in before and "Album printing offer" in after and "Past event" not in hp
+assert 'href="https://example.com/offer"' in after and "javascript:" not in hp
+pr1 = con.execute("SELECT id FROM promos WHERE title='Diwali Mela shoot'").fetchone()[0]
+assert pub.get(f"/brand/promo/{pr1}").mimetype == "image/jpeg"
+adm.post(f"/admin/promos/{pr1}/toggle", data={"csrf": csrf}); assert "Diwali Mela shoot" not in pub.get("/").get_data(as_text=True)
+adm.post(f"/admin/promos/{pr1}/delete", data={"csrf": csrf}); assert pub.get(f"/brand/promo/{pr1}").status_code == 404
+print("ok  next events and offers show before / after sign-in; past events hide; unsafe links refused")
+
+# staff accounts: can manage albums, nothing else
+import re
+assert b"at least 8" in adm.post("/admin/team", data={"csrf": csrf, "username": "ravi", "password": "short"}, follow_redirects=True).data
+adm.post("/admin/team", data={"csrf": csrf, "username": "Ravi", "password": "ravi-pass-1"})
+st = A.app.test_client()
+assert b"Wrong user name or password" in st.post("/admin/login", data={"username": "ravi", "password": "nope-nope"}).data
+assert st.post("/admin/login", data={"username": "ravi", "password": "ravi-pass-1"}).status_code == 302
+spage = st.get("/admin").get_data(as_text=True); scsrf = re.search(r'name="csrf" value="(\w+)"', spage).group(1)
+assert "Signed in as ravi" in spage and "Guests and downloads" not in spage and "Add a new album" in spage
+for path in ("/admin/guests", "/admin/brand", "/admin/team", "/admin/settings"):
+    assert st.get(path).status_code == 302, path
+assert st.get("/admin/downloads.csv").status_code == 403
+assert st.post("/admin/settings", data={"csrf": scsrf, "threshold": "0.31"}).status_code == 403 and config.MATCH_THRESHOLD == 0.45
+assert st.post("/admin/brand", data={"csrf": scsrf, "brand": "Hack"}).status_code == 403
+assert st.post("/admin/team", data={"csrf": scsrf, "username": "evil", "password": "evil-pass-1"}).status_code == 403
+sd = tmp / "staffalbum"; sd.mkdir(); img(RED, sd / "s.png")
+assert st.post("/admin/events", data={"csrf": scsrf, "name": "Staff album", "folders": str(sd), "event_date": "2026-12-01"}).status_code == 302
+sid_ = con.execute("SELECT id FROM events WHERE name='Staff album'").fetchone()[0]; wait(sid_)
+assert con.execute("SELECT detail FROM audit WHERE action='album_created' ORDER BY id DESC").fetchone()[0].endswith("by ravi")
+rid_ = con.execute("SELECT id FROM staff WHERE username='ravi'").fetchone()[0]
+adm.post(f"/admin/team/{rid_}/toggle", data={"csrf": csrf})                # blocked: the open session stops working at once
+assert st.get("/admin").status_code == 302 and st.post("/admin/login", data={"username": "ravi", "password": "ravi-pass-1"}).status_code == 200
+adm.post(f"/admin/team/{rid_}/toggle", data={"csrf": csrf}); adm.post(f"/admin/team/{rid_}/password", data={"csrf": csrf, "password": "new-pass-22"})
+assert st.post("/admin/login", data={"username": "ravi", "password": "ravi-pass-1"}).status_code == 200
+assert st.post("/admin/login", data={"username": "ravi", "password": "new-pass-22"}).status_code == 302
+print("ok  staff can add and scan albums only; blocking a staff member works at once")
+
+# many albums: search and pages; files that were not scanned are listed
+for i in range(23):
+    con.execute("INSERT INTO events(name,code,folders,created_at,event_date) VALUES(?,?,?,?,?)", (f"Bulk {i:02d}", f"bulk{i}", "", time.time(), "2031-05-01"))
+con.commit()
+p1 = adm.get("/admin").get_data(as_text=True)
+assert p1.count('<details class="album"') == 20 and "Page 1 of" in p1 and "Bulk 22" in p1 and "Bulk 01" not in p1
+assert "Bulk 01" in adm.get("/admin?page=2").get_data(as_text=True)
+one = adm.get("/admin?q=Bulk 07").get_data(as_text=True); assert one.count('<details class="album"') == 1 and "1 album matching" in one
+assert adm.get("/admin?q=2031-05").get_data(as_text=True).count('<details class="album"') == 20
+assert adm.get("/admin?q=zzzz").get_data(as_text=True).count("No album matches this search") == 1
+assert list(adm.get(f"/admin/status?ids={sid_}").json) == [str(sid_)]
+con.execute("DELETE FROM events WHERE name LIKE 'Bulk %'"); con.commit()
+(sd / "damaged.jpg").write_bytes(b"not really a jpg"); indexer.index_event(sid_)
+errs = con.execute("SELECT relpath, reason FROM scan_errors WHERE event_id=?", (sid_,)).fetchall()
+assert len(errs) == 1 and errs[0]["relpath"].endswith("damaged.jpg") and "readable" in errs[0]["reason"], [tuple(e) for e in errs]
+pg = adm.get("/admin?q=Staff album").get_data(as_text=True); assert "Files that were not scanned (1)" in pg and "damaged.jpg" in pg
+assert adm.post("/admin/settings", data={"csrf": csrf, "scan_side": "1600"}).status_code == 302 and config.SCAN_SIDE == 1600
+assert adm.post("/admin/settings", data={"csrf": csrf, "scan_side": "999"}).status_code == 302 and config.SCAN_SIDE == 1600
+adm.post("/admin/settings", data={"csrf": csrf, "scan_side": "1280"})
+print("ok  albums are searched and paged; unscanned files are listed with the reason; scan detail setting")
 
 # LAN / VLAN rules
 import netutil

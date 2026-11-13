@@ -38,6 +38,16 @@ CREATE TABLE IF NOT EXISTS downloads(
   id INTEGER PRIMARY KEY, ts REAL, email TEXT, photo_id INTEGER, event_id INTEGER,
   relpath TEXT, ip TEXT);
 CREATE INDEX IF NOT EXISTS downloads_email ON downloads(email);
+CREATE TABLE IF NOT EXISTS staff(
+  id INTEGER PRIMARY KEY, username TEXT UNIQUE NOT NULL, salt TEXT, pw_hash TEXT,
+  active INTEGER DEFAULT 1, created_at REAL);
+CREATE TABLE IF NOT EXISTS promos(
+  id INTEGER PRIMARY KEY, kind TEXT, title TEXT, body TEXT, link TEXT, event_date TEXT,
+  show_before INTEGER DEFAULT 1, show_after INTEGER DEFAULT 1, active INTEGER DEFAULT 1,
+  created_at REAL);
+CREATE TABLE IF NOT EXISTS scan_errors(
+  event_id INTEGER, relpath TEXT, reason TEXT);
+CREATE INDEX IF NOT EXISTS scan_errors_event ON scan_errors(event_id);
 CREATE TABLE IF NOT EXISTS audit(
   id INTEGER PRIMARY KEY, ts REAL, email TEXT, event_id INTEGER,
   action TEXT, detail TEXT, ip TEXT);
@@ -63,6 +73,12 @@ def init():
                        ("otps", "name"), ("otps", "phone")):
         if col not in {r[1] for r in con.execute(f"PRAGMA table_info({table})")}:
             con.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT DEFAULT ''")
+    con.execute("CREATE INDEX IF NOT EXISTS events_date ON events(event_date)")
+    # Photos are given without waiting for approval (asked for by the owner);
+    # done once, the per-album switch still works afterwards.
+    if not con.execute("SELECT 1 FROM kv WHERE k='approval_off_done'").fetchone():
+        con.execute("UPDATE events SET require_approval=0")
+        con.execute("INSERT INTO kv(k,v) VALUES('approval_off_done','1')")
     con.commit()
     con.close()
 
