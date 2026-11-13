@@ -13,7 +13,7 @@
   <span class="mark">{% if studio.logo %}<img src="{{ url_for('brand_logo') }}?v={{ studio.v }}" alt="{{ brand }}">{% else %}{{ brand }}{% endif %}</span>
   <a class="nav {{ 'on' if page == 'albums' }}" href="{{ url_for('admin') }}">Albums</a>
   {% if owner %}
-  <a class="nav {{ 'on' if page == 'guests' }}" href="{{ url_for('admin_guests') }}">Guests and downloads</a>
+  <a class="nav {{ 'on' if page in ('guests', 'guest', 'downloads') }}" href="{{ url_for('admin_guests') }}">Guests and downloads</a>
   <a class="nav {{ 'on' if page == 'brand' }}" href="{{ url_for('admin_brand') }}">Look and promotions</a>
   <a class="nav {{ 'on' if page == 'team' }}" href="{{ url_for('admin_team') }}">Staff</a>
   <a class="nav {{ 'on' if page == 'settings' }}" href="{{ url_for('admin_settings_page') }}">Settings</a>
@@ -130,23 +130,79 @@
 
 {% elif page == 'guests' %}
 <h1>Guests and downloads</h1>
+<nav class="tabs" aria-label="Report"><a class="{{ 'on' if page in ('guests', 'guest') }}" href="{{ url_for('admin_guests') }}">Guests</a>
+<a class="{{ 'on' if page == 'downloads' }}" href="{{ url_for('admin_downloads') }}">All downloads</a></nav>
+<div class="stats">
+  <div class="stat"><b>{{ "{:,}".format(totals.guests) }}</b><span>guests signed in</span></div>
+  <div class="stat"><b>{{ "{:,}".format(totals.downloads) }}</b><span>photos downloaded in total</span></div>
+  <div class="stat"><b>{{ "{:,}".format(totals.today) }}</b><span>downloaded today</span></div>
+  <div class="stat"><b>{{ "{:,}".format(totals.week) }}</b><span>in the last 7 days, by {{ "{:,}".format(totals.active) }} guests</span></div>
+</div>
+{% if top %}<details class="card" open><summary>Albums with the most downloads</summary><div class="scroll"><table>
+<tr><th>Album</th><th>Date</th><th>Photos downloaded</th><th>Guests</th><th></th></tr>
+{% for t in top %}<tr><td>{{ t.name }}</td><td>{{ t.event_date or "-" }}</td><td>{{ "{:,}".format(t.n) }}</td><td>{{ "{:,}".format(t.people) }}</td>
+<td><a href="{{ url_for('admin_downloads', album=t.id) }}">See downloads</a></td></tr>{% endfor %}</table></div></details>{% endif %}
 <form class="toolbar" method="get" action="{{ url_for('admin_guests') }}" role="search">
-  <input type="search" name="q" value="{{ q }}" placeholder="Search by name, phone or email" aria-label="Search guests">
+  <input type="search" name="q" value="{{ q }}" placeholder="Search guests by name, phone or email" aria-label="Search guests">
   <button type="submit" class="dark">Search</button>
   {% if q %}<a class="btn ghost" href="{{ url_for('admin_guests') }}">Clear</a>{% endif %}
-  <a class="btn ghost" href="{{ url_for('admin_downloads_csv') }}">Full record for Excel</a>
 </form>
-<p class="hint">{{ "{:,}".format(total) }} guest{{ '' if total == 1 else 's' }}{% if q %} matching "{{ q }}"{% endif %}.</p>
+<p class="hint">{{ "{:,}".format(total) }} guest{{ '' if total == 1 else 's' }}{% if q %} matching "{{ q }}"{% endif %}, newest sign-in first.</p>
 <div class="card">{% if people %}<div class="scroll"><table>
 <tr><th>Name</th><th>Phone</th><th>Email</th><th>Photos downloaded</th><th>Saved</th><th>Last sign-in</th><th>Last download</th></tr>
-{% for u in people %}<tr><td>{{ u.name }}</td><td>{{ u.phone }}</td><td>{{ u.email }}</td>
-<td>{% if u.n %}<details><summary>{{ u.n }} photos</summary><ul class="files">{% for f in u.files %}<li>{{ f.relpath }}{% if f.album %} <span class="hint">({{ f.album }}, {{ fmt(f.ts) }})</span>{% endif %}</li>{% endfor %}</ul></details>{% else %}0{% endif %}</td>
-<td>{{ u.saved }}</td><td>{{ fmt(u.last_login) }}</td><td>{{ fmt(u.last_dl) }}</td></tr>{% endfor %}
+{% for u in people %}<tr><td><a href="{{ url_for('admin_guest', email=u.email) }}">{{ u.name or "(no name)" }}</a></td><td>{{ u.phone }}</td><td>{{ u.email }}</td>
+<td>{{ "{:,}".format(u.n) }}</td><td>{{ u.saved }}</td><td>{{ fmt(u.last_login) }}</td><td>{{ fmt(u.last_dl) }}</td></tr>{% endfor %}
 </table></div>{% else %}<p>{{ "No guest matches this search." if q else "No guest has signed in yet." }}</p>{% endif %}</div>
 {% if pages > 1 %}<nav class="pager" aria-label="Pages">
-{% if page_no > 1 %}<a class="btn ghost small" href="{{ url_for('admin_guests', q=q, page=page_no-1) }}">Previous</a>{% endif %}
-<span>Page {{ page_no }} of {{ pages }}</span>
-{% if page_no < pages %}<a class="btn ghost small" href="{{ url_for('admin_guests', q=q, page=page_no+1) }}">Next</a>{% endif %}
+{% if page_no > 1 %}<a class="btn ghost small" href="{{ url_for('admin_guests', page=page_no-1, q=q) }}">Previous</a>{% endif %}
+<span>Page {{ "{:,}".format(page_no) }} of {{ "{:,}".format(pages) }}</span>
+{% if page_no < pages %}<a class="btn ghost small" href="{{ url_for('admin_guests', page=page_no+1, q=q) }}">Next</a>{% endif %}
+</nav>{% endif %}
+
+{% elif page == 'guest' %}
+<h1>{{ u.name or u.email }}</h1>
+<nav class="tabs" aria-label="Report"><a class="{{ 'on' if page in ('guests', 'guest') }}" href="{{ url_for('admin_guests') }}">Guests</a>
+<a class="{{ 'on' if page == 'downloads' }}" href="{{ url_for('admin_downloads') }}">All downloads</a></nav>
+<div class="stats">
+  <div class="stat"><b>{{ "{:,}".format(total) }}</b><span>downloads</span></div>
+  <div class="stat"><b>{{ saved }}</b><span>saved photos</span></div>
+  <div class="stat"><b class="smallb">{{ u.phone }}</b><span>phone</span></div>
+  <div class="stat"><b class="smallb">{{ u.email }}</b><span>last sign-in {{ fmt(u.last_login) }}</span></div>
+</div>
+<p><a class="btn ghost small" href="{{ url_for('admin_downloads_csv', q=u.email) }}">This guest's record for Excel</a></p>
+<div class="card">{% if rows %}<div class="scroll"><table>
+<tr><th>Time</th><th>Album</th><th>Photo</th><th>IP</th></tr>
+{% for r in rows %}<tr><td>{{ fmt(r.ts) }}</td><td>{{ r.album }}</td><td>{{ r.relpath }}</td><td>{{ r.ip }}</td></tr>{% endfor %}
+</table></div>{% else %}<p>This guest has not downloaded a photo yet.</p>{% endif %}</div>
+{% if pages > 1 %}<nav class="pager" aria-label="Pages">
+{% if page_no > 1 %}<a class="btn ghost small" href="{{ url_for('admin_guest', page=page_no-1, email=u.email) }}">Previous</a>{% endif %}
+<span>Page {{ "{:,}".format(page_no) }} of {{ "{:,}".format(pages) }}</span>
+{% if page_no < pages %}<a class="btn ghost small" href="{{ url_for('admin_guest', page=page_no+1, email=u.email) }}">Next</a>{% endif %}
+</nav>{% endif %}
+
+{% elif page == 'downloads' %}
+<h1>All downloads</h1>
+<nav class="tabs" aria-label="Report"><a class="{{ 'on' if page in ('guests', 'guest') }}" href="{{ url_for('admin_guests') }}">Guests</a>
+<a class="{{ 'on' if page == 'downloads' }}" href="{{ url_for('admin_downloads') }}">All downloads</a></nav>
+<form class="toolbar" method="get" action="{{ url_for('admin_downloads') }}" role="search">
+  <input type="search" name="q" value="{{ f.q }}" placeholder="Guest name, phone, email or file name" aria-label="Search downloads">
+  <label class="inline-label" for="f-from">From</label><input id="f-from" type="date" name="from" value="{{ f.frm }}">
+  <label class="inline-label" for="f-to">To</label><input id="f-to" type="date" name="to" value="{{ f.to }}">
+  {% if album %}<input type="hidden" name="album" value="{{ album.id }}">{% endif %}
+  <button type="submit" class="dark">Show</button>
+  {% if f.q or f.frm or f.to or album %}<a class="btn ghost" href="{{ url_for('admin_downloads') }}">Clear</a>{% endif %}
+  <a class="btn ghost" href="{{ url_for('admin_downloads_csv', q=f.q, album=f.album, **{'from': f.frm, 'to': f.to}) }}">These rows for Excel</a>
+</form>
+<p class="hint">{{ "{:,}".format(total) }} download{{ '' if total == 1 else 's' }}{% if album %} from the album "{{ album.name }}"{% endif %}, newest first, 50 per page.</p>
+<div class="card">{% if rows %}<div class="scroll"><table>
+<tr><th>Time</th><th>Name</th><th>Phone</th><th>Email</th><th>Album</th><th>Photo</th></tr>
+{% for r in rows %}<tr><td>{{ fmt(r.ts) }}</td><td>{{ r.name or "" }}</td><td>{{ r.phone or "" }}</td>
+<td><a href="{{ url_for('admin_guest', email=r.email) }}">{{ r.email }}</a></td><td>{{ r.album }}</td><td>{{ r.relpath }}</td></tr>{% endfor %}
+</table></div>{% else %}<p>No download matches these filters.</p>{% endif %}</div>
+{% if pages > 1 %}<nav class="pager" aria-label="Pages">
+{% if page_no > 1 %}<a class="btn ghost small" href="{{ url_for('admin_downloads', page=page_no-1, q=f.q, album=f.album, **{'from': f.frm, 'to': f.to}) }}">Previous</a>{% endif %}
+<span>Page {{ "{:,}".format(page_no) }} of {{ "{:,}".format(pages) }}</span>
+{% if page_no < pages %}<a class="btn ghost small" href="{{ url_for('admin_downloads', page=page_no+1, q=f.q, album=f.album, **{'from': f.frm, 'to': f.to}) }}">Next</a>{% endif %}
 </nav>{% endif %}
 
 {% elif page == 'brand' %}
@@ -235,6 +291,8 @@
 <label for="threshold">How alike two faces must be (0.30 to 0.80)</label>
 <input id="threshold" name="threshold" type="number" min="0.30" max="0.80" step="0.01" value="{{ threshold }}" required>
 <p class="hint">Higher = fewer photos of other people, but some of the guest's own photos may be missed. To choose: use "Test with my own selfie" on an album; each photo shows its score. If another person's photo shows 0.52, set this to 0.55. No new scan is needed.</p>
+{% if wrong %}<p class="status {{ 'failed' if wrong.above else 'ready' }}">In the last 60 days, {{ wrong.n }} photo{{ '' if wrong.n == 1 else 's' }} were marked "not me" or "wrong person". The highest score among them was {{ "%.2f"|format(wrong.top) }}.
+{% if wrong.above %}{{ wrong.above }} of them would still appear today. Setting the strictness to {{ "%.2f"|format(wrong.suggest) }} would remove all of them.{% else %}None of them would appear with today's strictness.{% endif %}</p>{% endif %}
 <button type="submit">Save strictness</button></form>
 
 <form class="card" method="post" action="{{ url_for('admin_settings') }}"><input type="hidden" name="csrf" value="{{ csrf }}">

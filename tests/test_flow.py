@@ -423,7 +423,7 @@ adm.post("/admin/promos", data={"csrf": csrf, "kind": "ad", "title": "Album prin
 adm.post("/admin/promos", data={"csrf": csrf, "kind": "event", "title": "Past event", "event_date": "2020-01-01", "show_before": "on", "show_after": "on"})
 assert b"Not added" in adm.post("/admin/promos", data={"csrf": csrf, "title": "Bad", "link": "javascript:alert(1)"}, follow_redirects=True).data
 hp = pub.get("/").get_data(as_text=True)
-before, after = hp.split('id="after"')
+after, before = hp.split('id="after"')[1].split('id="before"')
 assert "Diwali Mela shoot" in before and "Album printing offer" not in before and "Album printing offer" in after and "Past event" not in hp
 assert 'href="https://example.com/offer"' in after and "javascript:" not in hp
 pr1 = con.execute("SELECT id FROM promos WHERE title='Diwali Mela shoot'").fetchone()[0]
@@ -479,6 +479,40 @@ assert adm.post("/admin/settings", data={"csrf": csrf, "scan_side": "1600"}).sta
 assert adm.post("/admin/settings", data={"csrf": csrf, "scan_side": "999"}).status_code == 302 and config.SCAN_SIDE == 1600
 adm.post("/admin/settings", data={"csrf": csrf, "scan_side": "1280"})
 print("ok  albums are searched and paged; unscanned files are listed with the reason; scan detail setting")
+
+# "possibly you" and "this is not me"; the strictness hint for the owner
+con.execute("DELETE FROM otps"); con.commit(); sent.clear()
+keep6 = code; code = ""; n1 = A.app.test_client(); login(n1, "notme@x.com")
+r = n1.post("/api/selfie", json={"image": img(RED), "date_from": "2026-11-01", "date_to": "2026-11-30"}, headers=H).json
+assert len(r["photos"]) == 2 and r["maybe"] == [], r                  # exact matches are sure
+config.MATCH_THRESHOLD = 0.95                                          # now the same matches are only just above the bar
+assert sorted(n1.get("/api/me").json["maybe"]) == sorted(r["photos"])
+config.MATCH_THRESHOLD = 0.45
+assert n1.post(f"/api/not-me/{blue_h}", json={}, headers=H).status_code == 404         # not in my results
+assert n1.post(f"/api/not-me/{r['photos'][0]}", json={}, headers=H).json["ok"] is True
+assert n1.get("/api/me").json["photos"] == r["photos"][1:] and n1.get(f"/api/preview/{r['photos'][0]}").status_code == 404
+sp = adm.get("/admin/settings").get_data(as_text=True)
+assert 'marked "not me"' in sp and "Setting the strictness to 0.80" in sp, sp[sp.find("In the last"):][:300]
+assert st.post("/admin/wrong", json={"id": 1, "score": 0.5}).status_code == 403            # needs the page's token
+assert adm.post("/admin/wrong", json={"id": 1, "score": 0.5}, headers={"X-CSRF": csrf}).json["ok"] is True
+code = keep6
+print("ok  close matches are shown apart; 'not me' removes a photo and tells the owner how strict to be")
+
+# download report for many guests: summary, one guest, filtered log, filtered Excel file
+gp = adm.get("/admin/guests").get_data(as_text=True)
+assert "photos downloaded in total" in gp and "Albums with the most downloads" in gp and "Haldi" in gp
+one_g = adm.get("/admin/guest?email=u1@x.com").get_data(as_text=True); assert "Test Guest" in one_g and "r.png" in one_g
+assert adm.get("/admin/guest?email=nobody@x.com").status_code == 302
+alld = adm.get("/admin/downloads").get_data(as_text=True); n_all = con.execute("SELECT COUNT(*) FROM downloads").fetchone()[0]
+assert f"{n_all} download" in alld and "u1@x.com" in alld
+only_u1 = adm.get("/admin/downloads?q=u1@x.com").get_data(as_text=True); assert "2 downloads" in only_u1 and "multi@x.com" not in only_u1
+assert "0 downloads" in adm.get("/admin/downloads?from=2001-01-01&to=2001-01-02").get_data(as_text=True)
+assert "from the album" in adm.get(f"/admin/downloads?album={pid_of['Haldi']}").get_data(as_text=True)
+csv_u1 = adm.get("/admin/downloads.csv?q=u1@x.com").get_data(as_text=True); assert csv_u1.count("u1@x.com") == 2 and "multi@x.com" not in csv_u1
+assert adm.get("/admin/downloads.csv").get_data(as_text=True).count("\n") == n_all + 1
+for path in ("/admin/downloads", "/admin/guest?email=u1@x.com"):
+    assert st.get(path).status_code == 302, path                     # staff cannot see the report
+print("ok  download report: summary, single guest, filtered log and Excel file; owner only")
 
 # LAN / VLAN rules
 import netutil

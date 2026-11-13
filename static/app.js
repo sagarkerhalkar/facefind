@@ -8,14 +8,44 @@
   let email = "", stream = null, pollTimer = null, chosen = null, last = null;
   const saved = new Set(), picked = new Set();
 
-  // the stack of prints leans towards the pointer (the one 3D moment)
-  const prints = $("prints");
-  if (prints && window.matchMedia("(hover:hover) and (prefers-reduced-motion:no-preference)").matches) {
+  const maybe = new Set();
+  let order = [], at = -1, mode = "found";      // photos of the page, and the one shown full page
+
+  // depth: the sign-in card leans a little towards the pointer
+  const calm = !window.matchMedia("(hover:hover) and (prefers-reduced-motion:no-preference)").matches;
+  if (!calm) {
     document.addEventListener("pointermove", (e) => {
-      prints.style.setProperty("--tx", (e.clientX / window.innerWidth - 0.5).toFixed(3));
-      prints.style.setProperty("--ty", (e.clientY / window.innerHeight - 0.5).toFixed(3));
+      if (document.body.classList.contains("in")) return;
+      app.style.setProperty("--tx", (e.clientX / window.innerWidth - 0.5).toFixed(3));
+      app.style.setProperty("--ty", (e.clientY / window.innerHeight - 0.5).toFixed(3));
     }, { passive: true });
   }
+  // depth: in a row of event / offer cards, each card turns towards the middle
+  const reels = [];
+  document.querySelectorAll(".reel").forEach((reel) => {
+    const turn = () => {
+      if (!reel.clientWidth) return;            // not on screen yet
+      const mid = reel.getBoundingClientRect().left + reel.clientWidth / 2;
+      reel.querySelectorAll(".promo").forEach((card) => {
+        const r = card.getBoundingClientRect();
+        const off = Math.max(-1, Math.min(1, (r.left + r.width / 2 - mid) / reel.clientWidth));
+        card.style.setProperty("--turn", calm ? 0 : off.toFixed(3));
+        card.style.setProperty("--near", calm ? 1 : (1 - Math.abs(off)).toFixed(3));
+      });
+    };
+    reel.addEventListener("scroll", turn, { passive: true });
+    window.addEventListener("resize", turn);
+    reels.push(turn);
+    turn();
+  });
+
+  const ICON = {
+    heart: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.600-7 10-7 10z"/></svg>',
+    down: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0l-4.500-4.500M12 15l4.500-4.500M5 20h14"/></svg>',
+    close: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+    prev: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>',
+    next: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>',
+  };
 
   async function api(path, body) {
     const opt = body === undefined ? {} : {
@@ -49,6 +79,10 @@
     const inside = stepNo >= 3;
     document.body.classList.toggle("in", inside);
     $("after").hidden = !inside;
+    const before = $("before");
+    if (before) before.hidden = inside;
+    if (id !== "step-gallery") closeViewer();
+    reels.forEach((turn) => turn());
     if (id !== "step-gallery") { picked.clear(); paintTray(); }
   }
 
@@ -187,6 +221,8 @@
   function render(st, fresh) {
     saved.clear();
     (st.saved || []).forEach((id) => saved.add(id));
+    maybe.clear();
+    (st.maybe || []).forEach((id) => maybe.add(id));
     if (st.status === "pending") {
       show("step-pending", 3);
       pollTimer = setTimeout(refresh, 10000);
@@ -201,7 +237,8 @@
     gallery(st.groups || [], "found");
   }
 
-  function gallery(groups, mode) {
+  function gallery(groups, which) {
+    mode = which;
     show("step-gallery", 4);
     const n = groups.reduce((a, grp) => a + grp.photos.length, 0);
     $("g-title").textContent = mode === "saved"
@@ -209,7 +246,7 @@
       : (n === 1 ? "1 photo of you" : n + " photos of you");
     $("g-empty").hidden = n > 0;
     $("g-empty").textContent = mode === "saved"
-      ? "You have not saved any photo yet. Press Save under a photo to keep it for your next visit."
+      ? "You have not saved any photo yet. Press the heart on a photo to keep it for your next visit."
       : "No photos matched this selfie. Try a clearer selfie in good light, or check that you chose the right events.";
     $("dl-all").hidden = n === 0;
     $("dl-all").textContent = mode === "saved" ? "Download all saved" : "Download all";
@@ -221,59 +258,161 @@
     picked.clear(); paintTray();
     const grid = $("grid");
     grid.textContent = "";
+    order = [];
     const named = portal || groups.length > 1 || mode === "saved";
+    const block = (ids) => {
+      const box = document.createElement("div");
+      box.className = "tiles";
+      ids.forEach((id) => { order.push(id); box.append(photoCard(id)); });
+      grid.append(box);
+    };
     groups.forEach((grp) => {
       if (named) {
         const h = document.createElement("h2");
-        h.className = "group";
         h.textContent = grp.name + (grp.date ? " - " + niceDate(grp.date) : "") + " (" + grp.photos.length + ")";
         grid.append(h);
       }
-      grp.photos.forEach((id) => grid.append(photoCard(id)));
+      // sure matches first; the ones close to the limit apart, so nothing is skipped
+      const sure = mode === "saved" ? grp.photos : grp.photos.filter((id) => !maybe.has(id));
+      const unsure = mode === "saved" ? [] : grp.photos.filter((id) => maybe.has(id));
+      if (sure.length) block(sure);
+      if (unsure.length) {
+        const h = document.createElement("h3");
+        h.textContent = "Possibly you (" + unsure.length + ")";
+        const note = document.createElement("p");
+        note.className = "hint";
+        note.textContent = "These look similar but we are less sure. Open a photo and press \"This is not me\" to remove it.";
+        grid.append(h, note);
+        block(unsure);
+      }
     });
+  }
+
+  function iconButton(name, label) {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "icon";
+    b.setAttribute("aria-label", label);
+    b.innerHTML = ICON[name];
+    return b;
+  }
+
+  async function toggleSave(id) {
+    const r = await api("/api/bookmark/" + id, { on: !saved.has(id) });
+    if (!r.ok) { say(r.error || "Could not save this photo."); return; }
+    if (r.on) saved.add(id); else saved.delete(id);
+    $("show-saved").textContent = "My saved photos (" + saved.size + ")";
+    const b = document.querySelector('.tile[data-id="' + id + '"] .save');
+    if (b) b.setAttribute("aria-pressed", saved.has(id) ? "true" : "false");
+    paintViewer();
+  }
+
+  function setPicked(id, on) {
+    if (on) picked.add(id); else picked.delete(id);
+    const tile = document.querySelector('.tile[data-id="' + id + '"]');
+    if (tile) { tile.classList.toggle("picked", on); tile.querySelector(".pick").checked = on; }
+    paintTray(); paintViewer();
   }
 
   function photoCard(id) {
     const fig = document.createElement("figure");
+    fig.className = "tile"; fig.dataset.id = id;
+    const open = document.createElement("button");
+    open.type = "button"; open.className = "open";
+    open.setAttribute("aria-label", "Open this photo full page");
     const img = document.createElement("img");
-    img.loading = "lazy";
-    img.alt = "Preview of your photo";
+    img.loading = "lazy"; img.alt = "";
     img.src = "/api/preview/" + id;
     img.addEventListener("error", () => { img.alt = "This photo cannot be shown right now"; }, { once: true });
+    open.append(img);
+    open.addEventListener("click", () => openViewer(id));
     const pick = document.createElement("input");
     pick.type = "checkbox"; pick.className = "pick";
     pick.setAttribute("aria-label", "Select this photo for download");
-    pick.addEventListener("change", () => {
-      if (pick.checked) picked.add(id); else picked.delete(id);
-      fig.classList.toggle("picked", pick.checked);
-      paintTray();
-    });
-    const row = document.createElement("div");
-    row.className = "acts";
-    const keep = document.createElement("button");
-    keep.type = "button"; keep.className = "ghost";
-    const paint = () => {
-      keep.textContent = saved.has(id) ? "Saved" : "Save";
-      keep.setAttribute("aria-pressed", saved.has(id) ? "true" : "false");
-    };
-    paint();
-    keep.addEventListener("click", async () => {
-      busy(keep, true);
-      const r = await api("/api/bookmark/" + id, { on: !saved.has(id) });
-      busy(keep, false);
-      if (!r.ok) return say(r.error || "Could not save this photo.");
-      if (r.on) saved.add(id); else saved.delete(id);
-      paint();
-      $("show-saved").textContent = "My saved photos (" + saved.size + ")";
-    });
-    const b = document.createElement("button");
-    b.type = "button";
-    b.textContent = "Download";
-    b.addEventListener("click", () => download(id, b));
-    row.append(keep, b);
-    fig.append(img, pick, row);
+    pick.addEventListener("change", () => setPicked(id, pick.checked));
+    const bar = document.createElement("div");
+    bar.className = "tile-bar";
+    const keep = iconButton("heart", "Save this photo for my next visit");
+    keep.classList.add("save");
+    keep.setAttribute("aria-pressed", saved.has(id) ? "true" : "false");
+    keep.addEventListener("click", () => toggleSave(id));
+    const dl = iconButton("down", "Download this photo");
+    dl.addEventListener("click", () => download(id, dl));
+    bar.append(keep, dl);
+    fig.append(open, pick, bar);
     return fig;
   }
+
+  // ---- one photo, full page: arrows, swipe, Esc
+  const viewer = $("viewer");
+  $("v-close").innerHTML = ICON.close; $("v-prev").innerHTML = ICON.prev; $("v-next").innerHTML = ICON.next;
+  function paintViewer() {
+    if (viewer.hidden || at < 0) return;
+    const id = order[at];
+    $("v-count").textContent = (at + 1) + " of " + order.length;
+    $("v-save").textContent = saved.has(id) ? "Saved" : "Save";
+    $("v-save").setAttribute("aria-pressed", saved.has(id) ? "true" : "false");
+    $("v-pick").textContent = picked.has(id) ? "Selected" : "Select";
+    $("v-pick").setAttribute("aria-pressed", picked.has(id) ? "true" : "false");
+    $("v-notme").hidden = mode === "saved";
+    $("v-prev").disabled = at === 0; $("v-next").disabled = at === order.length - 1;
+  }
+  function openViewer(id) {
+    at = order.indexOf(id);
+    if (at < 0) return;
+    viewer.hidden = false;
+    document.body.classList.add("noscroll");
+    $("v-img").src = "/api/preview/" + id;
+    paintViewer();
+    $("v-close").focus();
+  }
+  function closeViewer() {
+    if (!viewer || viewer.hidden) return;
+    viewer.hidden = true; at = -1;
+    document.body.classList.remove("noscroll");
+  }
+  function step(by) {
+    const to = at + by;
+    if (to < 0 || to >= order.length) return;
+    at = to;
+    const img = $("v-img");
+    img.style.animation = "none"; void img.offsetWidth; img.style.animation = "";
+    img.src = "/api/preview/" + order[at];
+    paintViewer();
+  }
+  $("v-close").addEventListener("click", closeViewer);
+  $("v-prev").addEventListener("click", () => step(-1));
+  $("v-next").addEventListener("click", () => step(1));
+  $("v-dl").addEventListener("click", (e) => download(order[at], e.target));
+  $("v-save").addEventListener("click", () => toggleSave(order[at]));
+  $("v-pick").addEventListener("click", () => setPicked(order[at], !picked.has(order[at])));
+  $("v-notme").addEventListener("click", async (e) => {
+    const id = order[at];
+    busy(e.target, true);
+    const r = await api("/api/not-me/" + id, {});
+    busy(e.target, false);
+    if (!r.ok) return;
+    closeViewer();
+    if (last) {
+      last.groups.forEach((grp) => { grp.photos = grp.photos.filter((x) => x !== id); });
+      last.groups = last.groups.filter((grp) => grp.photos.length);
+      saved.delete(id);
+      gallery(last.groups, "found");
+    }
+  });
+  document.addEventListener("keydown", (e) => {
+    if (viewer.hidden) return;
+    if (e.key === "Escape") closeViewer();
+    else if (e.key === "ArrowLeft") step(-1);
+    else if (e.key === "ArrowRight") step(1);
+  });
+  let touchX = null;
+  viewer.addEventListener("touchstart", (e) => { touchX = e.touches[0].clientX; }, { passive: true });
+  viewer.addEventListener("touchend", (e) => {
+    if (touchX === null) return;
+    const dx = e.changedTouches[0].clientX - touchX;
+    touchX = null;
+    if (Math.abs(dx) > 50) step(dx < 0 ? 1 : -1);
+  }, { passive: true });
 
   // ---- several photos ticked: one download
   function paintTray() {
@@ -281,10 +420,7 @@
     $("tray-count").textContent = picked.size + (picked.size === 1 ? " photo selected" : " photos selected");
   }
   $("tray-clear").addEventListener("click", () => {
-    picked.clear();
-    $("grid").querySelectorAll(".pick").forEach((b) => { b.checked = false; });
-    $("grid").querySelectorAll("figure.picked").forEach((f) => f.classList.remove("picked"));
-    paintTray();
+    [...picked].forEach((id) => setPicked(id, false));
   });
   $("tray-dl").addEventListener("click", async (e) => {
     busy(e.target, true); say("");

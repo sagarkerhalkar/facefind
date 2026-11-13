@@ -1,9 +1,10 @@
-{% macro promo_inner(p) %}{% if p.image %}<img src="{{ url_for('brand_promo', pid=p.id) }}?v={{ p.created_at|int }}" alt="" loading="lazy">{% endif %}
+{% macro promo_reel(items, cls, title) %}{% if items %}<section class="showcase {{ cls }}"><h2>{{ title }}</h2><div class="reel">
+{% for p in items %}{% if p.link %}<a class="promo" href="{{ p.link }}" target="_blank" rel="noopener noreferrer">{% else %}<div class="promo">{% endif %}
+{% if p.image %}<img src="{{ url_for('brand_promo', pid=p.id) }}?v={{ p.created_at|int }}" alt="" loading="lazy">{% endif %}
+<span class="kind">{{ "Next event" if p.kind == 'event' else "Offer" }}</span>
 <div>{% if p.kind == 'event' and p.event_date %}<span class="when">{{ p.event_date.split('-')|reverse|join('-') }}</span>{% endif %}
-<b>{{ p.title }}</b>{% if p.body %}<span>{{ p.body }}</span>{% endif %}</div>{% endmacro %}
-{% macro promo_cards(items, cls) %}{% if items %}<div class="promos {{ cls }}">
-{% for p in items %}{% if p.link %}<a class="promo" href="{{ p.link }}" target="_blank" rel="noopener noreferrer">{{ promo_inner(p) }}</a>
-{% else %}<div class="promo">{{ promo_inner(p) }}</div>{% endif %}{% endfor %}</div>{% endif %}{% endmacro %}
+<b>{{ p.title }}</b>{% if p.body %}<span>{{ p.body }}</span>{% endif %}</div>
+{% if p.link %}</a>{% else %}</div>{% endif %}{% endfor %}</div></section>{% endif %}{% endmacro %}
 <!doctype html>
 <html lang="en">
 <head>
@@ -11,7 +12,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#16132d">
 <title>{{ event.name if event else ("Find your photos" if portal else "Link not found") }} - {{ brand }}</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=4">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=5">
 <link rel="stylesheet" href="{{ url_for('brand_theme') }}?v={{ studio.v }}">
 </head>
 <body>
@@ -21,8 +22,7 @@
   {% if event or portal %}
   <h1>{{ event.name if event else "Your photos are waiting" }}</h1>
   <p class="lead">{{ studio.tagline }}</p>
-  <div class="prints" id="prints" aria-hidden="true"><div class="print"><i></i></div><div class="print"><i></i></div><div class="print"><i></i></div></div>
-  {{ promo_cards(promos_before, "") }}
+  <ul class="points"><li>No app to install</li><li>Only you see your photos</li><li>Full-quality downloads</li></ul>
   {% endif %}
 </header>
 <main class="panel" id="app" data-code="{{ event.code if event else '' }}" data-portal="{{ '1' if portal else '' }}">
@@ -103,20 +103,28 @@
       <button id="retry" type="button" class="ghost">New search</button>
       <button id="forget" type="button" class="ghost">Sign out</button></div>
     </div>
-    <p class="hint" id="g-hint">Tick photos to download only those. Save keeps a photo for your next visit.</p>
+    <p class="hint" id="g-hint">Tap a photo to see it full page. Tick photos to download only those. The heart keeps a photo for your next visit.</p>
     <p id="g-empty" class="card" hidden></p>
-    <div id="grid" class="grid"></div>
+    <div id="grid"></div>
     <div class="tray" id="tray" hidden><span id="tray-count"></span>
       <span><button type="button" class="ghost small" id="tray-clear">Clear</button>
       <button type="button" class="small" id="tray-dl">Download selected</button></span></div>
   </section>
 
-  {% if promos_before %}<section class="phone-only">{{ promo_cards(promos_before, "light") }}</section>{% endif %}
-  <section id="after" hidden>{% if promos_after %}<h2>From {{ brand }}</h2>{{ promo_cards(promos_after, "light") }}{% endif %}</section>
+  <div id="after" hidden>{{ promo_reel(promos_after, "light", "From " ~ brand) }}</div>
   <p class="foot">Photos are shown only to the verified email address. Every download is recorded.</p>
 {% endif %}
 </main>
 </div>
-<script src="{{ url_for('static', filename='app.js') }}?v=4"></script>
+{% if event or portal %}<div id="before">{{ promo_reel(promos_before, "", "Coming up at " ~ brand) }}</div>
+<div id="viewer" class="viewer" role="dialog" aria-modal="true" aria-label="Photo, full page" hidden>
+  <div class="v-top"><span id="v-count"></span><button type="button" class="icon" id="v-close" aria-label="Close the full-page view"></button></div>
+  <div class="v-mid"><button type="button" class="icon v-nav" id="v-prev" aria-label="Previous photo"></button>
+    <div class="frame"><img id="v-img" alt="Your photo, full page"></div>
+    <button type="button" class="icon v-nav" id="v-next" aria-label="Next photo"></button></div>
+  <div class="v-bar"><button type="button" id="v-dl">Download</button><button type="button" class="ghost" id="v-save">Save</button>
+    <button type="button" class="ghost" id="v-pick">Select</button><button type="button" class="ghost" id="v-notme">This is not me</button></div>
+</div>{% endif %}
+<script src="{{ url_for('static', filename='app.js') }}?v=5"></script>
 </body>
 </html>

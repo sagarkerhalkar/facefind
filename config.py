@@ -81,6 +81,8 @@ SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
 MAIL_FROM = os.environ.get("MAIL_FROM", SMTP_USER)
 BREVO_API_KEY = os.environ.get("BREVO_API_KEY", "")   # mail over HTTPS (when mail ports are blocked)
 
+# Matches this close above the bar are shown apart as "possibly you".
+MAYBE_MARGIN = float(os.environ.get("MAYBE_MARGIN", "0.08"))
 OTP_TTL = int(os.environ.get("OTP_TTL_SECONDS", "300"))
 OTP_MAX_ATTEMPTS = 5
 OTP_PER_EMAIL = 3          # sends per 15 minutes
