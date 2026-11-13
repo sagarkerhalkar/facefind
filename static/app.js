@@ -8,14 +8,54 @@
   let email = "", stream = null, pollTimer = null, chosen = null, last = null;
   const saved = new Set(), picked = new Set();
 
-  // the stack of prints leans towards the pointer (the one 3D moment)
-  const prints = $("prints");
-  if (prints && window.matchMedia("(hover:hover) and (prefers-reduced-motion:no-preference)").matches) {
-    document.addEventListener("pointermove", (e) => {
-      prints.style.setProperty("--tx", (e.clientX / window.innerWidth - 0.5).toFixed(3));
-      prints.style.setProperty("--ty", (e.clientY / window.innerHeight - 0.5).toFixed(3));
-    }, { passive: true });
+  const calm = window.matchMedia("(prefers-reduced-motion:reduce)").matches;
+  const hover = window.matchMedia("(hover:hover)").matches;
+
+  // ---- the sign-in card leans towards the pointer and catches the light
+  if (hover && !calm) {
+    document.querySelectorAll(".tilt").forEach((card) => {
+      card.addEventListener("pointermove", (e) => {
+        const r = card.getBoundingClientRect();
+        const x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
+        card.style.setProperty("--ry", ((x - 0.5) * 7).toFixed(2) + "deg");
+        card.style.setProperty("--rx", ((0.5 - y) * 6).toFixed(2) + "deg");
+        card.style.setProperty("--mx", (x * 100).toFixed(1) + "%");
+        card.style.setProperty("--my", (y * 100).toFixed(1) + "%");
+      });
+      card.addEventListener("pointerleave", () => {
+        card.style.setProperty("--rx", "0deg"); card.style.setProperty("--ry", "0deg");
+      });
+    });
   }
+
+  // ---- offers and next events stand in a 3D row; one is in front
+  document.querySelectorAll(".flow").forEach((flow) => {
+    const cards = [...flow.querySelectorAll(".promo")];
+    let front = 0, timer = null;
+    function place() {
+      cards.forEach((c, i) => {
+        let pos = i - front;
+        if (pos > cards.length / 2) pos -= cards.length;
+        if (pos < -cards.length / 2) pos += cards.length;
+        if (cards.length === 2 && pos === -1) pos = 1;
+        c.dataset.pos = pos;
+        c.setAttribute("aria-hidden", pos === 0 ? "false" : "true");
+        c.tabIndex = pos === 0 && c.tagName === "A" ? 0 : -1;
+      });
+    }
+    function step(n) { front = (front + n + cards.length) % cards.length; place(); }
+    function play() { if (!calm && cards.length > 1) timer = setInterval(() => step(1), 5000); }
+    cards.forEach((c, i) => c.addEventListener("click", (e) => {
+      if (i !== front) { e.preventDefault(); front = i; place(); }      // a side card comes to the front first
+    }));
+    const nav = document.querySelector('.flow-nav[data-for="' + flow.id + '"]');
+    if (nav) nav.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
+      clearInterval(timer); step(Number(b.dataset.step));
+    }));
+    flow.addEventListener("pointerenter", () => clearInterval(timer));
+    flow.addEventListener("pointerleave", () => { clearInterval(timer); play(); });
+    place(); play();
+  });
 
   async function api(path, body) {
     const opt = body === undefined ? {} : {
@@ -240,6 +280,11 @@
     img.alt = "Preview of your photo";
     img.src = "/api/preview/" + id;
     img.addEventListener("error", () => { img.alt = "This photo cannot be shown right now"; }, { once: true });
+    img.tabIndex = 0;
+    img.setAttribute("role", "button");
+    img.setAttribute("aria-label", "Open this photo full page");
+    img.addEventListener("click", () => openViewer(id));
+    img.addEventListener("keydown", (e) => { if (e.key === "Enter") openViewer(id); });
     const pick = document.createElement("input");
     pick.type = "checkbox"; pick.className = "pick";
     pick.setAttribute("aria-label", "Select this photo for download");
@@ -271,8 +316,76 @@
     b.textContent = "Download";
     b.addEventListener("click", () => download(id, b));
     row.append(keep, b);
+    fig.dataset.id = id;
     fig.append(img, pick, row);
     return fig;
+  }
+
+  // ---- one photo, full page: arrows / swipe to move, Esc to close
+  let viewer = null, viewing = 0, shown = [];
+  function openViewer(id) {
+    shown = [...$("grid").querySelectorAll("figure")].map((f) => Number(f.dataset.id));
+    viewing = Math.max(0, shown.indexOf(id));
+    if (!viewer) buildViewer();
+    viewer.hidden = false;
+    document.body.classList.add("viewing");
+    paintViewer();
+    viewer.querySelector(".v-close").focus();
+  }
+  function closeViewer() {
+    viewer.hidden = true;
+    document.body.classList.remove("viewing");
+    const fig = $("grid").querySelector('figure[data-id="' + shown[viewing] + '"] img');
+    if (fig) fig.focus();
+  }
+  function move(n) { viewing = (viewing + n + shown.length) % shown.length; paintViewer(); }
+  function paintViewer() {
+    const id = shown[viewing];
+    viewer.querySelector("img").src = "/api/preview/" + id;
+    viewer.querySelector(".v-count").textContent = (viewing + 1) + " of " + shown.length;
+    const keep = viewer.querySelector(".v-save"), tick = viewer.querySelector(".v-pick");
+    keep.textContent = saved.has(id) ? "Saved" : "Save";
+    keep.setAttribute("aria-pressed", saved.has(id) ? "true" : "false");
+    tick.textContent = picked.has(id) ? "Selected" : "Select";
+    tick.setAttribute("aria-pressed", picked.has(id) ? "true" : "false");
+    viewer.querySelectorAll(".nav").forEach((b) => { b.hidden = shown.length < 2; });
+  }
+  function buildViewer() {
+    const el = (tag, cls, text) => { const x = document.createElement(tag); if (cls) x.className = cls; if (text) x.textContent = text; return x; };
+    viewer = el("div", "viewer");
+    viewer.setAttribute("role", "dialog"); viewer.setAttribute("aria-modal", "true"); viewer.setAttribute("aria-label", "Photo");
+    const top = el("div", "v-top"), stage = el("div", "v-stage"), bottom = el("div", "v-bottom");
+    const close = el("button", "ghost small v-close", "Close"); close.type = "button";
+    top.append(el("span", "v-count"), close);
+    const img = el("img"); img.alt = "Your photo, large";
+    const prev = el("button", "ghost nav prev", "\u2039"), next = el("button", "ghost nav next", "\u203A");
+    prev.type = next.type = "button"; prev.setAttribute("aria-label", "Previous photo"); next.setAttribute("aria-label", "Next photo");
+    stage.append(prev, img, next);
+    const tick = el("button", "ghost v-pick"), keep = el("button", "ghost v-save"), dl = el("button", "", "Download");
+    tick.type = keep.type = dl.type = "button";
+    bottom.append(tick, keep, dl);
+    viewer.append(top, stage, bottom);
+    document.body.append(viewer);
+    close.addEventListener("click", closeViewer);
+    prev.addEventListener("click", () => move(-1)); next.addEventListener("click", () => move(1));
+    stage.addEventListener("click", (e) => { if (e.target === stage) closeViewer(); });
+    dl.addEventListener("click", () => download(shown[viewing], dl));
+    const cardOf = (id) => $("grid").querySelector('figure[data-id="' + id + '"]');
+    keep.addEventListener("click", () => { cardOf(shown[viewing]).querySelector(".acts button").click(); setTimeout(paintViewer, 400); });
+    tick.addEventListener("click", () => { cardOf(shown[viewing]).querySelector(".pick").click(); paintViewer(); });
+    document.addEventListener("keydown", (e) => {
+      if (!viewer || viewer.hidden) return;
+      if (e.key === "Escape") closeViewer();
+      if (e.key === "ArrowLeft") move(-1);
+      if (e.key === "ArrowRight") move(1);
+    });
+    let startX = null;
+    stage.addEventListener("touchstart", (e) => { startX = e.touches[0].clientX; }, { passive: true });
+    stage.addEventListener("touchend", (e) => {
+      if (startX === null) return;
+      const dx = e.changedTouches[0].clientX - startX; startX = null;
+      if (Math.abs(dx) > 50) move(dx < 0 ? 1 : -1);
+    });
   }
 
   // ---- several photos ticked: one download

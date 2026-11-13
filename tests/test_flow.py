@@ -480,6 +480,57 @@ assert adm.post("/admin/settings", data={"csrf": csrf, "scan_side": "999"}).stat
 adm.post("/admin/settings", data={"csrf": csrf, "scan_side": "1280"})
 print("ok  albums are searched and paged; unscanned files are listed with the reason; scan detail setting")
 
+# matching rules, with made-up signatures: person P has 8 album faces; a look-alike resembles the selfie only
+rng = np.random.default_rng(7)
+def unit(v): return (v / np.linalg.norm(v)).astype(np.float32)
+P = unit(rng.normal(size=128))
+album_faces = [unit(P + 0.055 * rng.normal(size=128)) for _ in range(8)]              # the person, eight times
+selfie_v = unit(P + 0.07 * rng.normal(size=128))                                       # the selfie differs a bit more
+other = unit(rng.normal(size=128)); other = unit(other - (other @ selfie_v) * selfie_v)
+lookalike = unit(0.52 * selfie_v + 0.854 * other)                                      # 0.52 alike to the selfie only
+stranger = unit(rng.normal(size=128))
+M = np.vstack(album_faces + [lookalike, stranger]); big = np.full(len(M), 150, np.float32)
+assert float(lookalike @ selfie_v) > 0.5 and all(float(f @ selfie_v) > 0.5 for f in album_faces)
+found_, _ = indexer.match(M, big, selfie_v, 0.45)
+assert sorted(found_.tolist()) == list(range(8)), found_          # all eight kept, the look-alike dropped by the group check
+few, _ = indexer.match(M[[0, 1, 8]], big[:3], selfie_v, 0.45)
+assert sorted(few.tolist()) == [0, 1, 2]                          # with fewer than four matches the group check cannot run
+weak = unit(0.5 * selfie_v + 0.866 * other)
+tiny, _ = indexer.match(np.vstack([weak]), np.array([30], np.float32), selfie_v, 0.45)
+normal_, _ = indexer.match(np.vstack([weak]), np.array([150], np.float32), selfie_v, 0.45)
+assert len(tiny) == 0 and len(normal_) == 1                      # a tiny face needs a clearly higher score
+print("ok  matching: group check drops a look-alike, tiny faces need a higher score")
+
+# "Scan every photo again" re-reads all photos of an album
+before_ids = [r[0] for r in con.execute("SELECT id FROM photos WHERE event_id=?", (sid_,))]
+adm.post(f"/admin/events/{sid_}/rescan", data={"csrf": csrf}); wait(sid_)
+assert indexer.progress[sid_]["scanned"] >= 1 and [r[0] for r in con.execute("SELECT id FROM photos WHERE event_id=?", (sid_,))] == before_ids
+assert con.execute("SELECT size FROM faces WHERE event_id=?", (sid_,)).fetchone() is not None
+
+# download report: totals, date filter, one guest's page, Excel file by date and by guest
+con.execute("INSERT INTO downloads(ts,email,photo_id,event_id,relpath,ip) VALUES(?,?,?,?,?,?)",
+            (time.mktime(time.strptime("2020-03-05", "%Y-%m-%d")) + 3600, "u1@x.com", 1, pid_of["Haldi"], "old/long-ago.jpg", "1.1.1.1"))
+con.commit()
+rep_ = adm.get("/admin/guests").get_data(as_text=True)
+assert "photos downloaded today" in rep_ and "Albums with the most downloads" in rep_ and "Haldi" in rep_
+old_ = adm.get("/admin/guests?from=2020-03-01&to=2020-03-31").get_data(as_text=True)
+assert "1 photos downloaded by 1 guests" in old_ and "u1@x.com" in old_ and "multi@x.com" not in old_
+assert "multi@x.com" in adm.get("/admin/guests?only=downloaded").get_data(as_text=True)
+one_ = adm.get("/admin/guest?email=u1@x.com").get_data(as_text=True)
+assert "old/long-ago.jpg" in one_ and "Test Guest" in one_ and "9876543210" in one_
+assert adm.get("/admin/guest?email=nobody@x.com").status_code == 302 and st.get("/admin/guest?email=u1@x.com").status_code == 302
+csv_old = adm.get("/admin/downloads.csv?from=2020-03-01&to=2020-03-31").get_data(as_text=True)
+assert csv_old.count("\n") == 2 and "old/long-ago.jpg" in csv_old
+csv_one = adm.get("/admin/downloads.csv?email=multi@x.com").get_data(as_text=True)
+assert "multi@x.com" in csv_one and "u1@x.com" not in csv_one
+con.executemany("INSERT INTO downloads(ts,email,photo_id,event_id,relpath,ip) VALUES(?,?,?,?,?,?)",
+                [(time.time(), "u1@x.com", i, pid_of["Haldi"], f"bulk/{i}.jpg", "") for i in range(5000)]); con.commit()
+t0 = time.time(); big_csv = adm.get("/admin/downloads.csv").get_data(as_text=True); page_ = adm.get("/admin/guests"); took = time.time() - t0
+assert big_csv.count("\n") > 5000 and page_.status_code == 200 and took < 5, took
+assert "Page 1 of" in adm.get("/admin/guest?email=u1@x.com").get_data(as_text=True)
+con.execute("DELETE FROM downloads WHERE relpath LIKE 'bulk/%' OR relpath='old/long-ago.jpg'"); con.commit()
+print("ok  full rescan; download report with totals, dates, per-guest page and Excel export")
+
 # LAN / VLAN rules
 import netutil
 config.ALLOWED_NETWORKS = netutil.parse_networks("192.168.10.0/24, 192.168.20.0/24")

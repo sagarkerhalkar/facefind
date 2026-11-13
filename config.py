@@ -95,7 +95,12 @@ DOWNLOAD_LINK_TTL = 120    # seconds
 _thr = os.environ.get("MATCH_THRESHOLD", "").strip()
 MATCH_THRESHOLD = float(_thr) if _thr not in ("", "0.40", "0.363") else 0.45
 MAX_RESULTS = 500
-PREVIEW_SIDE = 900
+PREVIEW_SIDE = 1400         # watermarked preview, large enough for the full-page view
+# Matching is stricter for tiny faces (their signatures are less reliable), and
+# a photo must also resemble the guest's OTHER matched photos, not only the selfie.
+SMALL_FACE = 60             # face width in pixels below which the stricter bar applies
+SMALL_FACE_EXTRA = 0.08
+GROUP_EXTRA = 0.08
 # Photos scanned at the same time. More = faster, but the PC gets busier.
 SCAN_WORKERS = int(os.environ.get("SCAN_WORKERS", "0")) or max(1, min(6, (os.cpu_count() or 2) - 1))
 # Google Drive photos are read straight from Drive into memory (never saved).

@@ -49,6 +49,8 @@ over many drives:
 
 | 23 | Scanning too slow; no approval; select several photos to download; not 100% of photos scanned; all DSLR types; admin panel confusing with lakhs of events and users; look not international, not good on mobile; admin creates users for loading Drive links; company logo on downloaded photos, changeable; login background and logo changeable; next event details and advertisements before and after login; better login; 3D effects, colours, animation | **New look** for guest and admin (indigo and marigold, layered depth, a tilting stack of prints on the sign-in page, one colour setting). **Admin split into sections**: Albums, Guests and downloads, Look and promotions, Staff, Settings. Albums and guests are **searched and shown in pages** (20 / 30 per page). **Staff accounts**: the owner adds user name + password; staff can add albums, paste Drive links, scan and test, nothing else. **Look**: studio name, colour, logo, sign-in background, and an option to put the logo in the top right corner of downloaded photos. **Promotions**: next events and offers, shown before and/or after sign-in; past events hide themselves. **Tick several photos** and download them as one zip. **Approval switched off** on all existing albums (the per-album switch remains). **Files that were not scanned** are listed per album with the reason. **Scan**: default detail changed to Fast (about 40% more photos per second on the test machine), Drive reads 16 photos at a time; a Scan detail setting was added |
 
+| 24 | A selfie still shows other people; do not skip photos; click a photo for a full-page view; sign-in, offers and photo pages look childish - wants 3D and a look like the reference sites; download report must cope with lakhs of downloads and users; wants it on the web, not only on the local network | **Matching**: faces are now cut from the full-size photo (sharper signatures for small faces); a tiny face needs a higher score; with four or more matches a photo must also resemble the guest's other matched photos (drops look-alikes). "Scan every photo again" button added - needed once per album to get the sharper signatures. **Full-page viewer** with arrows, swipe, Save, Select, Download. **Guest pages redesigned**: dark gallery wall with the studio picture as backdrop, glass sign-in card that tilts to the pointer, offers in a 3D row, photos in their own shape in columns. **Download report**: totals (today, 7 days, all), busiest albums, date filter, guests in pages, one page per guest, Excel file streamed and filtered by date or guest. **On the web**: `start-web.bat` opens a Cloudflare tunnel and prints a public https address |
+
 ## Files a user runs
 
 | File | Purpose |
@@ -67,6 +69,16 @@ over many drives:
   files are sent unchanged, without logo.
 - Staff passwords are stored hashed (scrypt). The owner password is still the
   one in `.env`.
+- The face model in use (SFace) is a small, freely usable model. The much
+  more accurate open models (InsightFace "buffalo") are licensed for
+  non-commercial research only, so they were not put in. Options if matching
+  is still not good enough: buy an InsightFace commercial licence, or use a
+  paid cloud face service. Owner's decision.
+- The new matching rules were checked with made-up signatures and with one
+  sample person; their effect on a real album has not been measured.
+- `start-web.bat` could not be run on the build machine (no Windows, no
+  Cloudflare access). The app behind a proxy was checked with simulated
+  tunnel headers: links, secure cookies and visitor address were correct.
 - Face matching is never 100%: look-alikes, small or blurred faces can give a
   wrong photo. Higher strictness means fewer wrong photos and more missed ones.
 - Without approval and without a liveness check, a person can upload someone

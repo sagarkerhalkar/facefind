@@ -92,7 +92,10 @@ def _embed_file(job):
         job["t_read"] = t1 - t0
         if img is None:
             return job, None, "not a readable picture"
-        vecs = faces.thread_engine().embed(img)
+        engine = faces.thread_engine()
+        vecs = engine.embed(img)
+        sizes = getattr(engine, "sizes", None) or []
+        job["sizes"] = sizes if len(sizes) == len(vecs) else [0.0] * len(vecs)
         job["t_face"] = time.time() - t1
         return job, vecs, ""
     except Exception as e:
@@ -128,7 +131,7 @@ def preview_path(row):
     when the photo changes, so an old preview can never be shown for it."""
     import hashlib
     tag = hashlib.sha256(f"{row['root']}|{row['relpath']}|{row['mtime']}|{row['stamp']}"
-                         .encode()).hexdigest()[:16]
+                         f"|{config.PREVIEW_SIDE}".encode()).hexdigest()[:16]
     return config.CACHE_DIR / f"{row['id']}-{tag}.jpg"
 
 
@@ -231,8 +234,9 @@ def index_event(event_id):
                             (event_id, job["root"], job["rel"], job["mtime"], job["stamp"],
                              job["ref"])).lastrowid
                     con.executemany(
-                        "INSERT INTO faces(photo_id,event_id,embedding) VALUES(?,?,?)",
-                        [(pid, event_id, v.astype(np.float32).tobytes()) for v in vecs])
+                        "INSERT INTO faces(photo_id,event_id,embedding,size) VALUES(?,?,?,?)",
+                        [(pid, event_id, v.astype(np.float32).tobytes(), f"{z:.0f}")
+                         for v, z in zip(vecs, job["sizes"])])
                     st["faces"] += len(vecs)
                 if todo:
                     con.commit()                # guests can already find these photos
@@ -294,39 +298,64 @@ def start_index(event_id):
 
 
 def _matrix(con, event_id):
+    """(signatures, photo ids, face widths) of an album, kept in memory."""
     with _cache_lock:
         if event_id in _cache:
             return _cache[event_id]
-    rows = con.execute("SELECT photo_id, embedding FROM faces WHERE event_id=?",
+    rows = con.execute("SELECT photo_id, embedding, size FROM faces WHERE event_id=?",
                        (event_id,)).fetchall()
     if rows:
         m = np.vstack([np.frombuffer(r["embedding"], np.float32) for r in rows])
         ids = np.array([r["photo_id"] for r in rows])
+        sizes = np.array([float(r["size"] or 0) for r in rows], np.float32)
     else:
-        m, ids = np.zeros((0, 1), np.float32), np.array([], int)
+        m, ids, sizes = np.zeros((0, 1), np.float32), np.array([], int), np.zeros(0, np.float32)
     with _cache_lock:
-        _cache[event_id] = (m, ids)
-    return m, ids
+        _cache[event_id] = (m, ids, sizes)
+    return m, ids, sizes
+
+
+def match(m, sizes, vec, threshold=None):
+    """Which faces of an album are the person of this selfie -> (indexes, scores).
+
+    1. A face must be at least `threshold` alike to the selfie; a tiny face
+       (blurred, few pixels) must be clearly more alike.
+    2. When four or more faces pass, the best of them describe how this
+       person looks in THIS album. A face that resembles the selfie only by
+       chance (a look-alike, a child, a blurred face) does not resemble that
+       group and is dropped. With fewer faces this second check cannot be made.
+    """
+    thr = config.MATCH_THRESHOLD if threshold is None else threshold
+    sims = m @ vec
+    need = np.where((sizes > 0) & (sizes < config.SMALL_FACE), thr + config.SMALL_FACE_EXTRA, thr)
+    cand = np.nonzero(sims >= need)[0]
+    if len(cand) >= 4:
+        order = cand[np.argsort(-sims[cand])]
+        core = order[:max(3, len(order) // 4)]
+        centre = m[core].mean(axis=0) + vec / len(core)
+        centre /= np.linalg.norm(centre) or 1.0
+        cand = cand[(m[cand] @ centre) >= thr + config.GROUP_EXTRA]
+    return cand, sims[cand]
 
 
 def search(con, event_id, vec):
     """Returns [(photo_id, score)] best first."""
-    m, ids = _matrix(con, event_id)
+    m, ids, sizes = _matrix(con, event_id)
     if not len(ids):
         return []
-    sims = m @ vec
+    found, scores = match(m, sizes, vec)
     best = {}
-    for i in np.nonzero(sims >= config.MATCH_THRESHOLD)[0]:
-        pid, s = int(ids[i]), float(sims[i])
-        if s > best.get(pid, -1):
-            best[pid] = s
+    for i, sc in zip(found, scores):
+        pid, sc = int(ids[i]), float(sc)
+        if sc > best.get(pid, -1):
+            best[pid] = sc
     return sorted(best.items(), key=lambda x: -x[1])[: config.MAX_RESULTS]
 
 
 def stats(con, event_id, vec):
     """(faces in the album, best similarity for this selfie) - for the log,
     so a 'no photos' result can be explained."""
-    m, ids = _matrix(con, event_id)
+    m, ids, _ = _matrix(con, event_id)
     if not len(ids):
         return 0, 0.0
     return int(len(ids)), float((m @ vec).max())

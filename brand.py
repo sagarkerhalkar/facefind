@@ -39,7 +39,8 @@ def load():
     c = db.connect()
     try:
         config.BRAND = get(c, "brand")
-        config.SCAN_SIDE = config.DRIVE_SCAN_SIDE = int(get(c, "scan_side"))
+        config.SCAN_SIDE = int(get(c, "scan_side"))
+        config.DRIVE_SCAN_SIDE = max(1600, config.SCAN_SIDE)
         v = db.kv_get(c, "match_threshold")
         if v:
             config.MATCH_THRESHOLD = float(v)

@@ -1,30 +1,35 @@
-{% macro promo_inner(p) %}{% if p.image %}<img src="{{ url_for('brand_promo', pid=p.id) }}?v={{ p.created_at|int }}" alt="" loading="lazy">{% endif %}
-<div>{% if p.kind == 'event' and p.event_date %}<span class="when">{{ p.event_date.split('-')|reverse|join('-') }}</span>{% endif %}
-<b>{{ p.title }}</b>{% if p.body %}<span>{{ p.body }}</span>{% endif %}</div>{% endmacro %}
-{% macro promo_cards(items, cls) %}{% if items %}<div class="promos {{ cls }}">
-{% for p in items %}{% if p.link %}<a class="promo" href="{{ p.link }}" target="_blank" rel="noopener noreferrer">{{ promo_inner(p) }}</a>
-{% else %}<div class="promo">{{ promo_inner(p) }}</div>{% endif %}{% endfor %}</div>{% endif %}{% endmacro %}
+{% macro flow(items, id) %}{% if items %}
+<div class="flow" id="{{ id }}" aria-roledescription="carousel" aria-label="Next events and offers">
+{% for p in items %}{% if p.link %}<a class="promo{{ '' if p.image else ' plain' }}" href="{{ p.link }}" target="_blank" rel="noopener noreferrer">{% else %}<div class="promo{{ '' if p.image else ' plain' }}">{% endif %}
+{% if p.image %}<img src="{{ url_for('brand_promo', pid=p.id) }}?v={{ p.created_at|int }}" alt="" loading="lazy">{% endif %}
+<div class="txt">{% if p.kind == 'event' and p.event_date %}<span class="when">{{ p.event_date.split('-')|reverse|join('-') }}</span>{% endif %}
+<b>{{ p.title }}</b>{% if p.body %}<span>{{ p.body }}</span>{% endif %}</div>
+{% if p.link %}</a>{% else %}</div>{% endif %}{% endfor %}
+</div>
+{% if items|length > 1 %}<div class="flow-nav" data-for="{{ id }}"><button type="button" class="ghost" data-step="-1" aria-label="Previous">&#8249;</button><button type="button" class="ghost" data-step="1" aria-label="Next">&#8250;</button></div>{% endif %}
+{% endif %}{% endmacro %}
 <!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#16132d">
+<meta name="theme-color" content="#0d0b1a">
 <title>{{ event.name if event else ("Find your photos" if portal else "Link not found") }} - {{ brand }}</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=4">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=5">
 <link rel="stylesheet" href="{{ url_for('brand_theme') }}?v={{ studio.v }}">
 </head>
-<body>
+<body class="guest">
+<div class="backdrop" aria-hidden="true"></div>
+<header class="top"><span class="mark">{% if studio.logo %}<img src="{{ url_for('brand_logo') }}?v={{ studio.v }}" alt="{{ brand }}">{% else %}{{ brand }}{% endif %}</span>
+{% if event %}<span class="evname">{{ event.name }}</span>{% endif %}</header>
 <div class="stage">
-<header class="hero">
-  <span class="mark">{% if studio.logo %}<img src="{{ url_for('brand_logo') }}?v={{ studio.v }}" alt="{{ brand }}">{% else %}{{ brand }}{% endif %}</span>
-  {% if event or portal %}
+{% if event or portal %}
+<section class="pitch">
   <h1>{{ event.name if event else "Your photos are waiting" }}</h1>
   <p class="lead">{{ studio.tagline }}</p>
-  <div class="prints" id="prints" aria-hidden="true"><div class="print"><i></i></div><div class="print"><i></i></div><div class="print"><i></i></div></div>
-  {{ promo_cards(promos_before, "") }}
-  {% endif %}
-</header>
+  {{ flow(promos_before, "flow-before") }}
+</section>
+{% endif %}
 <main class="panel" id="app" data-code="{{ event.code if event else '' }}" data-portal="{{ '1' if portal else '' }}">
 {% if not event and not portal %}
   <section class="card"><h1>Link not found</h1>
@@ -33,25 +38,23 @@
   <ol class="steps"><li id="s1">Sign in</li><li id="s2">Code</li><li id="s3">{{ "Events and selfie" if portal else "Selfie" }}</li><li id="s4">Photos</li></ol>
   <p id="msg" class="msg" role="alert" hidden></p>
 
-  <section class="card" id="step-email" hidden>
+  <section class="card tilt" id="step-email" hidden>
     <h2>Sign in to see your photos</h2>
     <p>We email you a one-time code, so your photos reach only you.{% if portal %} One sign-in covers every event you attended.{% endif %}</p>
     <form id="f-email">
       <label for="gname">Your name</label>
       <input id="gname" type="text" autocomplete="name" required minlength="2" maxlength="80">
-      <div class="row">
-        <div><label for="phone">Phone number</label>
-        <input id="phone" type="tel" autocomplete="tel" inputmode="tel" required pattern="[+0-9 ()\-]{7,20}" placeholder="98765 43210"></div>
-        <div><label for="email">Email address</label>
-        <input id="email" type="email" autocomplete="email" required placeholder="you@example.com"></div>
-      </div>
+      <label for="phone">Phone number</label>
+      <input id="phone" type="tel" autocomplete="tel" inputmode="tel" required pattern="[+0-9 ()\-]{7,20}" placeholder="98765 43210">
+      <label for="email">Email address</label>
+      <input id="email" type="email" autocomplete="email" required placeholder="you@example.com">
       <label class="check"><input id="consent" type="checkbox" required>
         <span>I agree that my selfie is used once to find my face in {{ "the photos of the events I choose" if portal else "this event's photos" }}. The selfie is not kept after matching.</span></label>
       <button type="submit" class="wide">Email me the code</button>
     </form>
   </section>
 
-  <section class="card" id="step-otp" hidden>
+  <section class="card tilt" id="step-otp" hidden>
     <h2>Enter the code</h2>
     <p>We sent a 6-digit code to <b id="otp-email"></b>. It is valid for 5 minutes. Check the spam folder too.</p>
     <form id="f-otp">
@@ -103,7 +106,7 @@
       <button id="retry" type="button" class="ghost">New search</button>
       <button id="forget" type="button" class="ghost">Sign out</button></div>
     </div>
-    <p class="hint" id="g-hint">Tick photos to download only those. Save keeps a photo for your next visit.</p>
+    <p class="hint" id="g-hint">Open a photo to see it full page. Tick photos to download only those. Save keeps a photo for your next visit.</p>
     <p id="g-empty" class="card" hidden></p>
     <div id="grid" class="grid"></div>
     <div class="tray" id="tray" hidden><span id="tray-count"></span>
@@ -111,12 +114,12 @@
       <button type="button" class="small" id="tray-dl">Download selected</button></span></div>
   </section>
 
-  {% if promos_before %}<section class="phone-only">{{ promo_cards(promos_before, "light") }}</section>{% endif %}
-  <section id="after" hidden>{% if promos_after %}<h2>From {{ brand }}</h2>{{ promo_cards(promos_after, "light") }}{% endif %}</section>
+  {% if promos_before %}<section class="phone-flow">{{ flow(promos_before, "flow-phone") }}</section>{% endif %}
+  <section id="after" hidden>{% if promos_after %}<h2 class="after-title">From {{ brand }}</h2>{{ flow(promos_after, "flow-after") }}{% endif %}</section>
   <p class="foot">Photos are shown only to the verified email address. Every download is recorded.</p>
 {% endif %}
 </main>
 </div>
-<script src="{{ url_for('static', filename='app.js') }}?v=4"></script>
+<script src="{{ url_for('static', filename='app.js') }}?v=5"></script>
 </body>
 </html>
