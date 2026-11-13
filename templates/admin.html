@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#16132d">
 <title>Admin - {{ brand }}</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=4">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=5">
 <link rel="stylesheet" href="{{ url_for('brand_theme') }}?v={{ studio.v }}">
 </head>
 <body><div class="admin">
@@ -13,7 +13,7 @@
   <span class="mark">{% if studio.logo %}<img src="{{ url_for('brand_logo') }}?v={{ studio.v }}" alt="{{ brand }}">{% else %}{{ brand }}{% endif %}</span>
   <a class="nav {{ 'on' if page == 'albums' }}" href="{{ url_for('admin') }}">Albums</a>
   {% if owner %}
-  <a class="nav {{ 'on' if page == 'guests' }}" href="{{ url_for('admin_guests') }}">Guests and downloads</a>
+  <a class="nav {{ 'on' if page in ('guests', 'guest') }}" href="{{ url_for('admin_guests') }}">Guests and downloads</a>
   <a class="nav {{ 'on' if page == 'brand' }}" href="{{ url_for('admin_brand') }}">Look and promotions</a>
   <a class="nav {{ 'on' if page == 'team' }}" href="{{ url_for('admin_team') }}">Staff</a>
   <a class="nav {{ 'on' if page == 'settings' }}" href="{{ url_for('admin_settings_page') }}">Settings</a>
@@ -94,7 +94,8 @@
     <button type="button" class="copy nomargin" data-target="link{{ e.id }}">Copy link</button></div>
   <p class="hint">Photos come from:{% for f, up in e.folder_list %} <code>{{ f }}</code>{% if not up %} <b>(drive not connected)</b>{% endif %}{% endfor %}</p>
   {% set keep %}<input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="q" value="{{ q }}"><input type="hidden" name="page" value="{{ page_no }}">{% endset %}
-  <form class="inline" method="post" action="{{ url_for('admin_event_action', eid=e.id, action='index') }}">{{ keep }}<button class="small ghost">Scan again (new photos)</button></form>
+  <form class="inline" method="post" action="{{ url_for('admin_event_action', eid=e.id, action='index') }}">{{ keep }}<button class="small ghost">Scan new photos</button></form>
+  <form class="inline" method="post" action="{{ url_for('admin_event_action', eid=e.id, action='rescan') }}">{{ keep }}<button class="small ghost">Scan every photo again</button></form>
   <form class="inline" method="post" action="{{ url_for('admin_event_action', eid=e.id, action='toggle') }}">{{ keep }}<button class="small ghost">{{ "Close link" if e.active else "Open link" }}</button></form>
   <form class="inline" method="post" action="{{ url_for('admin_event_action', eid=e.id, action='approval') }}">{{ keep }}<button class="small ghost">Ask me before giving photos: {{ "ON" if e.require_approval else "OFF" }}</button></form>
   {% if e.n_errors %}<details><summary>Files that were not scanned ({{ e.n_errors }})</summary>
@@ -130,23 +131,58 @@
 
 {% elif page == 'guests' %}
 <h1>Guests and downloads</h1>
+<div class="stats">
+  <div class="stat"><b>{{ "{:,}".format(totals.today) }}</b><span>photos downloaded today</span></div>
+  <div class="stat"><b>{{ "{:,}".format(totals.week) }}</b><span>in the last 7 days</span></div>
+  <div class="stat"><b>{{ "{:,}".format(totals.all) }}</b><span>in total</span></div>
+  <div class="stat"><b>{{ "{:,}".format(totals.guests) }}</b><span>guests signed in</span></div>
+</div>
 <form class="toolbar" method="get" action="{{ url_for('admin_guests') }}" role="search">
   <input type="search" name="q" value="{{ q }}" placeholder="Search by name, phone or email" aria-label="Search guests">
-  <button type="submit" class="dark">Search</button>
-  {% if q %}<a class="btn ghost" href="{{ url_for('admin_guests') }}">Clear</a>{% endif %}
-  <a class="btn ghost" href="{{ url_for('admin_downloads_csv') }}">Full record for Excel</a>
+  <input type="date" name="from" value="{{ frm }}" aria-label="Downloads from date" class="narrow">
+  <input type="date" name="to" value="{{ to }}" aria-label="Downloads to date" class="narrow">
+  <select name="only" aria-label="Show"><option value="">All guests</option><option value="downloaded" {{ 'selected' if only == 'downloaded' }}>Only who downloaded</option></select>
+  <button type="submit" class="dark">Show</button>
+  {% if q or frm or to or only %}<a class="btn ghost" href="{{ url_for('admin_guests') }}">Clear</a>{% endif %}
+  <a class="btn ghost" href="{{ url_for('admin_downloads_csv', **{'from': frm, 'to': to}) }}">Excel file{{ " for these dates" if frm or to }}</a>
 </form>
-<p class="hint">{{ "{:,}".format(total) }} guest{{ '' if total == 1 else 's' }}{% if q %} matching "{{ q }}"{% endif %}.</p>
+{% if frm or to %}<p class="note">{{ frm or "the start" }} to {{ to or "today" }}: {{ "{:,}".format(totals.ranged) }} photos downloaded by {{ "{:,}".format(totals.takers) }} guests.</p>{% endif %}
+
+{% if top %}<details class="card" open><summary>Albums with the most downloads{{ " in these dates" if frm or to }}</summary>
+<div class="scroll"><table><tr><th>Album</th><th>Photos downloaded</th><th>Guests</th><th>Last download</th></tr>
+{% for t in top %}<tr><td>{{ t.name }}</td><td>{{ "{:,}".format(t.n) }}</td><td>{{ "{:,}".format(t.people) }}</td><td>{{ fmt(t.last) }}</td></tr>{% endfor %}
+</table></div></details>{% endif %}
+
+<p class="hint">{{ "{:,}".format(total) }} guest{{ '' if total == 1 else 's' }}{% if q %} matching "{{ q }}"{% endif %}. Open a guest to see every photo they took.</p>
 <div class="card">{% if people %}<div class="scroll"><table>
 <tr><th>Name</th><th>Phone</th><th>Email</th><th>Photos downloaded</th><th>Saved</th><th>Last sign-in</th><th>Last download</th></tr>
-{% for u in people %}<tr><td>{{ u.name }}</td><td>{{ u.phone }}</td><td>{{ u.email }}</td>
-<td>{% if u.n %}<details><summary>{{ u.n }} photos</summary><ul class="files">{% for f in u.files %}<li>{{ f.relpath }}{% if f.album %} <span class="hint">({{ f.album }}, {{ fmt(f.ts) }})</span>{% endif %}</li>{% endfor %}</ul></details>{% else %}0{% endif %}</td>
-<td>{{ u.saved }}</td><td>{{ fmt(u.last_login) }}</td><td>{{ fmt(u.last_dl) }}</td></tr>{% endfor %}
-</table></div>{% else %}<p>{{ "No guest matches this search." if q else "No guest has signed in yet." }}</p>{% endif %}</div>
+{% for u in people %}<tr><td><a href="{{ url_for('admin_guest', email=u.email) }}">{{ u.name or "(no name)" }}</a></td><td>{{ u.phone }}</td><td>{{ u.email }}</td>
+<td>{{ "{:,}".format(u.n) }}</td><td>{{ u.saved }}</td><td>{{ fmt(u.last_login) }}</td><td>{{ fmt(u.last_dl) }}</td></tr>{% endfor %}
+</table></div>{% else %}<p>{{ "No guest matches this search." if q or frm or to or only else "No guest has signed in yet." }}</p>{% endif %}</div>
 {% if pages > 1 %}<nav class="pager" aria-label="Pages">
-{% if page_no > 1 %}<a class="btn ghost small" href="{{ url_for('admin_guests', q=q, page=page_no-1) }}">Previous</a>{% endif %}
+{% if page_no > 1 %}<a class="btn ghost small" href="{{ url_for('admin_guests', q=q, only=only, page=page_no-1, **{'from': frm, 'to': to}) }}">Previous</a>{% endif %}
+<span>Page {{ page_no }} of {{ "{:,}".format(pages) }}</span>
+{% if page_no < pages %}<a class="btn ghost small" href="{{ url_for('admin_guests', q=q, only=only, page=page_no+1, **{'from': frm, 'to': to}) }}">Next</a>{% endif %}
+</nav>{% endif %}
+
+{% elif page == 'guest' %}
+<p><a href="{{ url_for('admin_guests') }}">Back to all guests</a></p>
+<h1>{{ u.name or u.email }}</h1>
+<div class="stats">
+  <div class="stat"><b>{{ "{:,}".format(total) }}</b><span>photos downloaded</span></div>
+  <div class="stat"><b>{{ saved }}</b><span>photos saved</span></div>
+  <div class="stat"><b>{{ albums|length }}</b><span>albums</span></div>
+</div>
+<div class="card"><p><b>Phone:</b> {{ u.phone }} &nbsp; <b>Email:</b> {{ u.email }} &nbsp; <b>Last sign-in:</b> {{ fmt(u.last_login) }}</p>
+{% if albums %}<p class="hint">{% for a in albums %}{{ a.name }}: {{ a.n }}{{ ", " if not loop.last }}{% endfor %}</p>{% endif %}
+<a class="btn ghost small" href="{{ url_for('admin_downloads_csv', email=u.email) }}">Excel file for this guest</a></div>
+<div class="card">{% if files %}<div class="scroll"><table><tr><th>Time</th><th>Album</th><th>Photo</th><th>IP</th></tr>
+{% for f in files %}<tr><td>{{ fmt(f.ts) }}</td><td>{{ f.album }}</td><td>{{ f.relpath }}</td><td>{{ f.ip }}</td></tr>{% endfor %}
+</table></div>{% else %}<p>This guest has not downloaded a photo yet.</p>{% endif %}</div>
+{% if pages > 1 %}<nav class="pager" aria-label="Pages">
+{% if page_no > 1 %}<a class="btn ghost small" href="{{ url_for('admin_guest', email=u.email, page=page_no-1) }}">Previous</a>{% endif %}
 <span>Page {{ page_no }} of {{ pages }}</span>
-{% if page_no < pages %}<a class="btn ghost small" href="{{ url_for('admin_guests', q=q, page=page_no+1) }}">Next</a>{% endif %}
+{% if page_no < pages %}<a class="btn ghost small" href="{{ url_for('admin_guest', email=u.email, page=page_no+1) }}">Next</a>{% endif %}
 </nav>{% endif %}
 
 {% elif page == 'brand' %}
@@ -254,5 +290,5 @@
 </table></div></details>
 {% endif %}
 </main></div>
-<script src="{{ url_for('static', filename='admin.js') }}?v=4"></script>
+<script src="{{ url_for('static', filename='admin.js') }}?v=5"></script>
 </body></html>

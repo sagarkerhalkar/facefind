@@ -70,10 +70,13 @@ def init():
     for table, col in (("photos", "ref"), ("photos", "stamp"),
                        ("events", "event_date"),            # day of the event, YYYY-MM-DD
                        ("sessions", "date_from"), ("sessions", "date_to"),
-                       ("otps", "name"), ("otps", "phone")):
+                       ("otps", "name"), ("otps", "phone"),
+                       ("faces", "size")):                  # face width in pixels (as text)
         if col not in {r[1] for r in con.execute(f"PRAGMA table_info({table})")}:
             con.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT DEFAULT ''")
     con.execute("CREATE INDEX IF NOT EXISTS events_date ON events(event_date)")
+    con.execute("CREATE INDEX IF NOT EXISTS downloads_ts ON downloads(ts)")
+    con.execute("CREATE INDEX IF NOT EXISTS downloads_event ON downloads(event_id)")
     # Photos are given without waiting for approval (asked for by the owner);
     # done once, the per-album switch still works afterwards.
     if not con.execute("SELECT 1 FROM kv WHERE k='approval_off_done'").fetchone():

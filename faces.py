@@ -28,25 +28,34 @@ class OpenCVEngine:
         self.lock = threading.Lock()
 
     def embed(self, bgr, max_side=None, min_face=36):
+        """Face signatures of a picture. Faces are FOUND on a reduced copy
+        (fast) but each face is then cut out of the full picture given here,
+        so a small face keeps all the detail the file has. self.sizes holds
+        the width of each face in that full picture (used to be stricter
+        with tiny faces)."""
         max_side = max_side or config.SCAN_SIDE
+        full = bgr
         h, w = bgr.shape[:2]
         s = min(1.0, max_side / max(h, w))
         if s < 1.0:
             bgr = cv2.resize(bgr, (int(w * s), int(h * s)), interpolation=cv2.INTER_AREA)
             h, w = bgr.shape[:2]
-        out = []
+        out, sizes = [], []
         with self.lock:
             self.det.setInputSize((w, h))
             _, found = self.det.detect(bgr)
-            if found is None:
-                return out
-            for f in found:
-                if f[2] < min_face or f[3] < min_face:
-                    continue
-                v = self.rec.feature(self.rec.alignCrop(bgr, f)).flatten().astype(np.float32)
-                n = np.linalg.norm(v)
-                if n > 0:
-                    out.append(v / n)
+            if found is not None:
+                for f in found:
+                    if f[2] < min_face or f[3] < min_face:
+                        continue
+                    big = f.copy()
+                    big[:14] = big[:14] / s          # box and the 5 face points, in the full picture
+                    v = self.rec.feature(self.rec.alignCrop(full, big)).flatten().astype(np.float32)
+                    n = np.linalg.norm(v)
+                    if n > 0:
+                        out.append(v / n)
+                        sizes.append(float(big[2]))
+        self.sizes = sizes
         return out
 
 
@@ -80,7 +89,7 @@ def decode_fast(data: bytes, want=None):
     """For scanning: a big camera photo is opened directly at 1/2, 1/4 or 1/8
     size (whichever still leaves `want` pixels), which is several times
     faster than opening it in full and shrinking it afterwards."""
-    want = want or config.SCAN_SIDE
+    want = want or config.SCAN_SIDE * 2      # twice the search size: faces are cut from this
     arr = np.frombuffer(data, np.uint8)
     flag = cv2.IMREAD_COLOR
     try:

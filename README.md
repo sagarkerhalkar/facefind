@@ -64,6 +64,27 @@ how alike two faces must be; use "Test with my own selfie" to see the scores.
   user name.
 - **Settings** - Google Drive, match strictness, scan detail, activity log.
 
+## On the web
+
+Double-click `start-web.bat`. It downloads Cloudflare's tunnel program,
+starts the app and prints a public address ending in `trycloudflare.com`.
+Guests open that address; the admin is that address plus `/admin`. No router
+changes are needed and HTTPS is included. Keep the window open; the PC must
+stay on, and the address changes at every start.
+
+For a fixed address on your own domain (the domain must be on a free
+Cloudflare account), run these once in the facefind folder, then use the
+last line instead of `start-web.bat`:
+
+    cloudflared.exe tunnel login
+    cloudflared.exe tunnel create facefind
+    cloudflared.exe tunnel route dns facefind photos.yourdomain.com
+    cloudflared.exe tunnel run --url http://127.0.0.1:8787 facefind
+
+and start the app with `HTTPS=0`, `TRUST_PROXY=1`, `HOST=127.0.0.1`,
+`PORT=8787` and `PUBLIC_URL=https://photos.yourdomain.com` in `.env`.
+Once it is on the web, use a long admin password.
+
 ## Photos from many drives
 
 When you create an event, type one folder per line – from as many drives as

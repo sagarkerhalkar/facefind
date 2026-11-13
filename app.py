@@ -306,7 +306,10 @@ def brand_theme():
     accent = brand.get(c, "accent")
     css = f":root{{--accent:{accent};--accent-ink:{_ink_for(accent)};}}\n"
     if brand.BACKGROUND.exists():
-        css += f".hero{{background-image:linear-gradient(160deg,rgba(22,19,45,.82),rgba(22,19,45,.55)),url(/brand/background?v={brand.version()});}}\n"
+        url = f"url(/brand/background?v={brand.version()})"
+        css += (f".backdrop{{background-image:{url};}}\n"
+                f".login-wrap{{background-image:linear-gradient(rgba(13,11,26,.72),rgba(13,11,26,.72)),{url};"
+                "background-size:cover;background-position:center;}}\n")
     return app.response_class(css, mimetype="text/css")
 
 
@@ -945,33 +948,92 @@ def admin():
                       drive_email=gdrive.robot_email())
 
 
+def _range():
+    """The report's date filter -> (from text, to text, sql, args) on downloads.ts."""
+    frm, to = request.args.get("from", ""), request.args.get("to", "")
+    sql, args = "", []
+    if DATE_RE.fullmatch(frm):
+        sql += " AND d.ts>=?"
+        args.append(time.mktime(time.strptime(frm, "%Y-%m-%d")))
+    else:
+        frm = ""
+    if DATE_RE.fullmatch(to):
+        sql += " AND d.ts<?"
+        args.append(time.mktime(time.strptime(to, "%Y-%m-%d")) + 86400)
+    else:
+        to = ""
+    return frm, to, sql, args
+
+
 @app.get("/admin/guests")
 def admin_guests():
-    """Everyone who signed in and what they downloaded - searchable, in pages."""
+    """Download report: totals, busiest albums, and the guests - searchable,
+    filtered by date, in pages. Built to stay quick with lakhs of rows."""
     if not is_owner():
         return redirect(url_for("admin"))
     c = con()
     q = request.args.get("q", "").strip()[:80]
-    sql, args = "", []
+    frm, to, dsql, dargs = _range()
+    only = request.args.get("only", "")
+    where, args = [], []
     if q:
-        sql, args = " WHERE name LIKE ? OR phone LIKE ? OR email LIKE ?", [f"%{q}%"] * 3
-    total = c.execute("SELECT COUNT(*) FROM users" + sql, args).fetchone()[0]
+        where.append("(u.name LIKE ? OR u.phone LIKE ? OR u.email LIKE ?)")
+        args += [f"%{q}%"] * 3
+    if dsql or only == "downloaded":      # guests who downloaded (in these dates)
+        where.append("EXISTS(SELECT 1 FROM downloads d WHERE d.email=u.email" + dsql + ")")
+        args += dargs
+    wsql = (" WHERE " + " AND ".join(where)) if where else ""
+    total = c.execute("SELECT COUNT(*) FROM users u" + wsql, args).fetchone()[0]
     page, pages, offset = paging(total, GUESTS_PER_PAGE)
-    people = []
-    for u in c.execute(
-            "SELECT u.email, u.name, u.phone, u.last_login, "
-            "(SELECT COUNT(DISTINCT photo_id) FROM downloads d WHERE d.email=u.email) AS n, "
-            "(SELECT MAX(ts) FROM downloads d WHERE d.email=u.email) AS last_dl, "
-            "(SELECT COUNT(*) FROM bookmarks b WHERE b.email=u.email) AS saved "
-            "FROM users u" + sql + " ORDER BY u.last_login DESC LIMIT ? OFFSET ?",
-            args + [GUESTS_PER_PAGE, offset]).fetchall():
-        u = dict(u)
-        u["files"] = c.execute(
-            "SELECT d.relpath, MAX(d.ts) AS ts, COALESCE(e.name, '') AS album FROM downloads d "
-            "LEFT JOIN events e ON e.id=d.event_id WHERE d.email=? "
-            "GROUP BY d.photo_id, d.relpath ORDER BY ts DESC LIMIT 100", (u["email"],)).fetchall()
-        people.append(u)
-    return admin_page("guests", people=people, q=q, total=total, page_no=page, pages=pages)
+    people = c.execute(
+        "SELECT u.email, u.name, u.phone, u.last_login, "
+        "(SELECT COUNT(DISTINCT photo_id) FROM downloads d WHERE d.email=u.email" + dsql + ") AS n, "
+        "(SELECT MAX(ts) FROM downloads d WHERE d.email=u.email" + dsql + ") AS last_dl, "
+        "(SELECT COUNT(*) FROM bookmarks b WHERE b.email=u.email) AS saved "
+        "FROM users u" + wsql + " ORDER BY u.last_login DESC LIMIT ? OFFSET ?",
+        dargs + dargs + args + [GUESTS_PER_PAGE, offset]).fetchall()
+    now = time.time()
+    day = time.mktime(time.strptime(time.strftime("%Y-%m-%d"), "%Y-%m-%d"))
+    count = lambda sql, a=(): c.execute(sql, a).fetchone()[0]      # noqa: E731
+    totals = dict(
+        today=count("SELECT COUNT(*) FROM downloads WHERE ts>=?", (day,)),
+        week=count("SELECT COUNT(*) FROM downloads WHERE ts>=?", (now - 7 * 86400,)),
+        all=count("SELECT COUNT(*) FROM downloads"),
+        ranged=count("SELECT COUNT(*) FROM downloads d WHERE 1=1" + dsql, dargs),
+        guests=count("SELECT COUNT(*) FROM users"),
+        takers=count("SELECT COUNT(DISTINCT email) FROM downloads d WHERE 1=1" + dsql, dargs))
+    top = c.execute(
+        "SELECT COALESCE(e.name, 'Deleted album') AS name, COUNT(*) AS n, "
+        "COUNT(DISTINCT d.email) AS people, MAX(d.ts) AS last FROM downloads d "
+        "LEFT JOIN events e ON e.id=d.event_id WHERE 1=1" + dsql +
+        " GROUP BY d.event_id ORDER BY n DESC LIMIT 10", dargs).fetchall()
+    return admin_page("guests", people=people, q=q, total=total, page_no=page, pages=pages,
+                      totals=totals, top=top, frm=frm, to=to, only=only)
+
+
+@app.get("/admin/guest")
+def admin_guest():
+    """One guest: every photo they downloaded, 50 per page."""
+    if not is_owner():
+        return redirect(url_for("admin"))
+    c = con()
+    email = request.args.get("email", "")
+    u = c.execute("SELECT * FROM users WHERE email=?", (email,)).fetchone()
+    if not u:
+        return redirect(url_for("admin_guests", msg="That guest was not found."))
+    total = c.execute("SELECT COUNT(*) FROM downloads WHERE email=?", (email,)).fetchone()[0]
+    page, pages, offset = paging(total, 50)
+    files = c.execute(
+        "SELECT d.ts, d.relpath, d.ip, COALESCE(e.name, 'Deleted album') AS album FROM downloads d "
+        "LEFT JOIN events e ON e.id=d.event_id WHERE d.email=? ORDER BY d.id DESC LIMIT 50 OFFSET ?",
+        (email, offset)).fetchall()
+    albums = c.execute(
+        "SELECT COALESCE(e.name, 'Deleted album') AS name, COUNT(*) AS n FROM downloads d "
+        "LEFT JOIN events e ON e.id=d.event_id WHERE d.email=? GROUP BY d.event_id ORDER BY n DESC",
+        (email,)).fetchall()
+    saved = c.execute("SELECT COUNT(*) FROM bookmarks WHERE email=?", (email,)).fetchone()[0]
+    return admin_page("guest", u=u, files=files, albums=albums, saved=saved, total=total,
+                      page_no=page, pages=pages, q=email)
 
 
 @app.get("/admin/brand")
@@ -1181,24 +1243,48 @@ def admin_status():
 
 @app.get("/admin/downloads.csv")
 def admin_downloads_csv():
-    """The whole download record as a file that opens in Excel."""
+    """The download record as a file that opens in Excel. Sent row by row, so
+    it works with lakhs of downloads; ?from=&to= limits the dates."""
     if not is_owner():
         abort(403)
     import csv
-    out = io.StringIO()
-    w = csv.writer(out)
-    w.writerow(["Time", "Name", "Phone", "Email", "Album", "Photo", "IP"])
-    for r in con().execute(
-            "SELECT d.ts, u.name, u.phone, d.email, COALESCE(e.name, '') AS album, d.relpath, d.ip "
-            "FROM downloads d LEFT JOIN users u ON u.email=d.email "
-            "LEFT JOIN events e ON e.id=d.event_id ORDER BY d.id DESC"):
-        row = [time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(r["ts"])), r["name"] or "",
-               r["phone"] or "", r["email"], r["album"], r["relpath"], r["ip"]]
-        # a cell that starts with = + - @ would be run as a formula by Excel
-        w.writerow([("'" + v) if isinstance(v, str) and v[:1] in "=+-@" else v for v in row])
+    frm, to, dsql, dargs = _range()
+    email = request.args.get("email", "")
+    if email:
+        dsql += " AND d.email=?"
+        dargs = dargs + [email]
+
+    def rows():
+        c = db.connect()                    # own connection: this runs after the request ends
+        out = io.StringIO()
+        w = csv.writer(out)
+        try:
+            w.writerow(["Time", "Name", "Phone", "Email", "Album", "Photo", "IP"])
+            for r in c.execute(
+                    "SELECT d.ts, u.name, u.phone, d.email, COALESCE(e.name, '') AS album, "
+                    "d.relpath, d.ip FROM downloads d LEFT JOIN users u ON u.email=d.email "
+                    "LEFT JOIN events e ON e.id=d.event_id WHERE 1=1" + dsql + " ORDER BY d.id DESC",
+                    dargs):
+                row = [time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(r["ts"])), r["name"] or "",
+                       r["phone"] or "", r["email"], r["album"], r["relpath"], r["ip"]]
+                # a cell that starts with = + - @ would be run as a formula by Excel
+                w.writerow([("'" + v) if isinstance(v, str) and v[:1] in "=+-@" else v for v in row])
+                if out.tell() > 64 * 1024:
+                    yield out.getvalue()
+                    out.seek(0)
+                    out.truncate()
+            yield out.getvalue()
+        finally:
+            c.close()
     return app.response_class(
-        "\ufeff" + out.getvalue(), mimetype="text/csv",
+        _prefixed(rows()),
+        mimetype="text/csv",
         headers={"Content-Disposition": "attachment; filename=facefind-downloads.csv"})
+
+
+def _prefixed(chunks):
+    yield "\ufeff"                           # tells Excel the file is UTF-8
+    yield from chunks
 
 
 @app.post("/admin/settings")
@@ -1212,7 +1298,8 @@ def admin_settings():
         if side not in ("1280", "1600", "2000"):
             return back("Not saved.")
         brand.put(c, "scan_side", side)
-        config.SCAN_SIDE = config.DRIVE_SCAN_SIDE = int(side)
+        config.SCAN_SIDE = int(side)
+        config.DRIVE_SCAN_SIDE = max(1600, config.SCAN_SIDE)
         c.commit()
         return back("Scan detail saved. It is used from the next scan on.")
     try:
@@ -1345,6 +1432,14 @@ def admin_event_action(eid, action):
     msg = ""
     if action == "index":
         msg = "Scan started." if indexer.start_index(eid) else "Scan already running."
+    elif action == "rescan":            # every photo again, with the current scan settings
+        if indexer.progress.get(eid, {}).get("state") == "running":
+            msg = "A scan is already running. Try again when it has finished."
+        else:
+            c.execute("UPDATE photos SET mtime=-1, stamp='again' WHERE event_id=?", (eid,))
+            c.commit()
+            indexer.start_index(eid)
+            msg = "Scanning every photo of this album again. Guests can keep using it meanwhile."
     elif action == "folders":
         folders, bad = _clean_folders(request.form.get("folders", ""))
         ev = c.execute("SELECT folders FROM events WHERE id=?", (eid,)).fetchone()
