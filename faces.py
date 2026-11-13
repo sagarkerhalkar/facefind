@@ -43,7 +43,11 @@ class OpenCVEngine:
             for f in found:
                 if f[2] < min_face or f[3] < min_face:
                     continue
-                v = self.rec.feature(self.rec.alignCrop(bgr, f)).flatten().astype(np.float32)
+                # The face is read twice, as it is and mirrored, and the two
+                # signatures are averaged: steadier than a single reading.
+                crop = self.rec.alignCrop(bgr, f)
+                v = self.rec.feature(crop).flatten().astype(np.float32)
+                v = v + self.rec.feature(cv2.flip(crop, 1)).flatten().astype(np.float32)
                 n = np.linalg.norm(v)
                 if n > 0:
                     out.append(v / n)

@@ -306,7 +306,9 @@ def brand_theme():
     accent = brand.get(c, "accent")
     css = f":root{{--accent:{accent};--accent-ink:{_ink_for(accent)};}}\n"
     if brand.BACKGROUND.exists():
-        css += f".hero{{background-image:linear-gradient(160deg,rgba(22,19,45,.82),rgba(22,19,45,.55)),url(/brand/background?v={brand.version()});}}\n"
+        css += (".stage{background-image:linear-gradient(100deg,rgba(14,11,32,.9) 0%,rgba(14,11,32,.62) 45%,"
+                f"rgba(14,11,32,.35) 100%),url(/brand/background?v={brand.version()});}}\n"
+                "body.in .stage{background-image:none;}\n")
     return app.response_class(css, mimetype="text/css")
 
 
@@ -456,11 +458,12 @@ def otp_verify():
 def _state(s):
     c = con()
     ev = c.execute("SELECT * FROM events WHERE id=?", (s["event_id"],)).fetchone()
-    photos, groups = [], []
+    photos, groups, maybe = [], [], []
     if s["status"] in ("matched", "approved"):
         by_event = {}
+        sure = config.MATCH_THRESHOLD + config.MAYBE_MARGIN
         for r in c.execute(
-                "SELECT m.photo_id, e.id AS eid, e.name, e.event_date FROM matches m "
+                "SELECT m.photo_id, m.score, e.id AS eid, e.name, e.event_date FROM matches m "
                 "JOIN photos p ON p.id=m.photo_id JOIN events e ON e.id=p.event_id "
                 "WHERE m.session_id=? ORDER BY e.event_date DESC, e.id DESC, m.score DESC",
                 (s["id"],)):
@@ -470,12 +473,14 @@ def _state(s):
                 groups.append(grp)
             grp["photos"].append(r["photo_id"])
             photos.append(r["photo_id"])
+            if r["score"] < sure:           # close to the bar: shown apart as "possibly you"
+                maybe.append(r["photo_id"])
     saved = [r[0] for r in c.execute(
         "SELECT b.photo_id FROM bookmarks b JOIN photos p ON p.id=b.photo_id "
         "JOIN events e ON e.id=p.event_id WHERE b.email=? AND e.active=1", (s["email"],))]
     u = c.execute("SELECT name FROM users WHERE email=?", (s["email"],)).fetchone()
     return dict(ok=True, email=s["email"], status=s["status"], photos=photos, groups=groups,
-                saved=saved, name=u["name"] if u else "",
+                maybe=maybe, saved=saved, name=u["name"] if u else "",
                 event_code=ev["code"] if ev else ("" if s["event_id"] == 0 else None),
                 date_from=s["date_from"], date_to=s["date_to"],
                 tries_left=max(0, config.SELFIE_MAX_TRIES - s["selfie_tries"]))
@@ -522,6 +527,26 @@ def bookmark(pid):
         c.execute("DELETE FROM bookmarks WHERE email=? AND photo_id=?", (s["email"], pid))
     c.commit()
     return jsonify(ok=True, on=on)
+
+
+@app.post("/api/not-me/<int:pid>")
+def not_me(pid):
+    """The guest says a photo is not them: it leaves their results, and the
+    score is kept so the owner can see how strict matching should be."""
+    s = guest()
+    if not s:
+        return err("Session expired. Please sign in again.", 401)
+    c = con()
+    row = c.execute("SELECT score FROM matches WHERE session_id=? AND photo_id=?",
+                    (s["id"], pid)).fetchone()
+    if not row:
+        abort(404)
+    c.execute("DELETE FROM matches WHERE session_id=? AND photo_id=?", (s["id"], pid))
+    c.execute("DELETE FROM bookmarks WHERE email=? AND photo_id=?", (s["email"], pid))
+    c.execute("INSERT INTO wrong_reports(ts,email,photo_id,score) VALUES(?,?,?,?)",
+              (time.time(), s["email"], pid, row["score"]))
+    c.commit()
+    return jsonify(ok=True)
 
 
 @app.get("/api/bookmarks")
@@ -945,9 +970,37 @@ def admin():
                       drive_email=gdrive.robot_email())
 
 
+def _download_filter():
+    """WHERE part for the download log from the page's filters."""
+    a = request.args
+    q, album = a.get("q", "").strip()[:80], a.get("album", type=int)
+    frm, to = a.get("from", ""), a.get("to", "")
+    where, args = [], []
+    if q:
+        where.append("(d.email LIKE ? OR d.relpath LIKE ? OR u.name LIKE ? OR u.phone LIKE ?)")
+        args += [f"%{q}%"] * 4
+    if album:
+        where.append("d.event_id=?")
+        args.append(album)
+    for value, op, shift in ((frm, ">=", 0), (to, "<", 86400)):
+        if DATE_RE.fullmatch(value):
+            try:
+                where.append(f"d.ts{op}?")
+                args.append(time.mktime(time.strptime(value, "%Y-%m-%d")) + shift)
+            except (ValueError, OverflowError):
+                where.pop()
+    sql = (" WHERE " + " AND ".join(where)) if where else ""
+    return sql, args, dict(q=q, album=album or "", frm=frm if DATE_RE.fullmatch(frm) else "",
+                           to=to if DATE_RE.fullmatch(to) else "")
+
+
+DL_FROM = ("FROM downloads d LEFT JOIN users u ON u.email=d.email "
+           "LEFT JOIN events e ON e.id=d.event_id")
+
+
 @app.get("/admin/guests")
 def admin_guests():
-    """Everyone who signed in and what they downloaded - searchable, in pages."""
+    """Summary of sign-ins and downloads, and the guests - searchable, in pages."""
     if not is_owner():
         return redirect(url_for("admin"))
     c = con()
@@ -957,21 +1010,67 @@ def admin_guests():
         sql, args = " WHERE name LIKE ? OR phone LIKE ? OR email LIKE ?", [f"%{q}%"] * 3
     total = c.execute("SELECT COUNT(*) FROM users" + sql, args).fetchone()[0]
     page, pages, offset = paging(total, GUESTS_PER_PAGE)
-    people = []
-    for u in c.execute(
-            "SELECT u.email, u.name, u.phone, u.last_login, "
-            "(SELECT COUNT(DISTINCT photo_id) FROM downloads d WHERE d.email=u.email) AS n, "
-            "(SELECT MAX(ts) FROM downloads d WHERE d.email=u.email) AS last_dl, "
-            "(SELECT COUNT(*) FROM bookmarks b WHERE b.email=u.email) AS saved "
-            "FROM users u" + sql + " ORDER BY u.last_login DESC LIMIT ? OFFSET ?",
-            args + [GUESTS_PER_PAGE, offset]).fetchall():
-        u = dict(u)
-        u["files"] = c.execute(
-            "SELECT d.relpath, MAX(d.ts) AS ts, COALESCE(e.name, '') AS album FROM downloads d "
-            "LEFT JOIN events e ON e.id=d.event_id WHERE d.email=? "
-            "GROUP BY d.photo_id, d.relpath ORDER BY ts DESC LIMIT 100", (u["email"],)).fetchall()
-        people.append(u)
-    return admin_page("guests", people=people, q=q, total=total, page_no=page, pages=pages)
+    people = c.execute(
+        "SELECT u.email, u.name, u.phone, u.last_login, "
+        "(SELECT COUNT(DISTINCT photo_id) FROM downloads d WHERE d.email=u.email) AS n, "
+        "(SELECT MAX(ts) FROM downloads d WHERE d.email=u.email) AS last_dl, "
+        "(SELECT COUNT(*) FROM bookmarks b WHERE b.email=u.email) AS saved "
+        "FROM users u" + sql + " ORDER BY u.last_login DESC LIMIT ? OFFSET ?",
+        args + [GUESTS_PER_PAGE, offset]).fetchall()
+    now = time.time()
+    day = now - (now % 86400)
+    one = lambda sql_, *a: c.execute(sql_, a).fetchone()[0]              # noqa: E731
+    totals = dict(
+        guests=one("SELECT COUNT(*) FROM users"),
+        downloads=one("SELECT COUNT(*) FROM downloads"),
+        today=one("SELECT COUNT(*) FROM downloads WHERE ts>=?", day),
+        week=one("SELECT COUNT(*) FROM downloads WHERE ts>=?", now - 7 * 86400),
+        active=one("SELECT COUNT(DISTINCT email) FROM downloads WHERE ts>=?", now - 7 * 86400))
+    top = c.execute(
+        "SELECT e.id, e.name, e.event_date, COUNT(*) AS n, COUNT(DISTINCT d.email) AS people "
+        "FROM downloads d JOIN events e ON e.id=d.event_id GROUP BY e.id ORDER BY n DESC LIMIT 10"
+    ).fetchall()
+    return admin_page("guests", people=people, q=q, total=total, page_no=page, pages=pages,
+                      totals=totals, top=top)
+
+
+@app.get("/admin/guest")
+def admin_guest():
+    """One guest: details and every photo they downloaded, in pages."""
+    if not is_owner():
+        return redirect(url_for("admin"))
+    c = con()
+    email = request.args.get("email", "")
+    u = c.execute("SELECT * FROM users WHERE email=?", (email,)).fetchone()
+    if not u:
+        return redirect(url_for("admin_guests", msg="That guest was not found."))
+    total = c.execute("SELECT COUNT(*) FROM downloads WHERE email=?", (email,)).fetchone()[0]
+    page, pages, offset = paging(total, 50)
+    rows = c.execute(
+        "SELECT d.ts, d.relpath, d.ip, COALESCE(e.name, '') AS album FROM downloads d "
+        "LEFT JOIN events e ON e.id=d.event_id WHERE d.email=? ORDER BY d.id DESC LIMIT 50 OFFSET ?",
+        (email, offset)).fetchall()
+    saved = c.execute("SELECT COUNT(*) FROM bookmarks WHERE email=?", (email,)).fetchone()[0]
+    return admin_page("guest", u=u, rows=rows, total=total, page_no=page, pages=pages,
+                      saved=saved, q="")
+
+
+@app.get("/admin/downloads")
+def admin_downloads():
+    """Every download, newest first - filter by guest, file, album and dates."""
+    if not is_owner():
+        return redirect(url_for("admin"))
+    c = con()
+    sql, args, f = _download_filter()
+    total = c.execute(f"SELECT COUNT(*) {DL_FROM}{sql}", args).fetchone()[0]
+    page, pages, offset = paging(total, 50)
+    rows = c.execute(
+        f"SELECT d.ts, d.email, d.relpath, d.ip, u.name, u.phone, COALESCE(e.name, '') AS album "
+        f"{DL_FROM}{sql} ORDER BY d.id DESC LIMIT 50 OFFSET ?", args + [offset]).fetchall()
+    album = c.execute("SELECT id, name FROM events WHERE id=?", (f["album"],)).fetchone() \
+        if f["album"] else None
+    return admin_page("downloads", rows=rows, total=total, page_no=page, pages=pages, f=f,
+                      album=album, q=f["q"])
 
 
 @app.get("/admin/brand")
@@ -1115,7 +1214,7 @@ def admin_settings_page():
     if not is_owner():
         return redirect(url_for("admin"))
     c = con()
-    return admin_page("settings", threshold=f"{config.MATCH_THRESHOLD:.2f}",
+    return admin_page("settings", threshold=f"{config.MATCH_THRESHOLD:.2f}", wrong=wrong_summary(c),
                       scan_side=config.SCAN_SIDE, drive_email=gdrive.robot_email(),
                       log=c.execute("SELECT * FROM audit ORDER BY id DESC LIMIT 200").fetchall())
 
@@ -1181,24 +1280,66 @@ def admin_status():
 
 @app.get("/admin/downloads.csv")
 def admin_downloads_csv():
-    """The whole download record as a file that opens in Excel."""
+    """The download record (with the page's filters) as a file for Excel.
+    It is written out piece by piece, so lakhs of rows are fine."""
     if not is_owner():
         abort(403)
     import csv
-    out = io.StringIO()
-    w = csv.writer(out)
-    w.writerow(["Time", "Name", "Phone", "Email", "Album", "Photo", "IP"])
-    for r in con().execute(
-            "SELECT d.ts, u.name, u.phone, d.email, COALESCE(e.name, '') AS album, d.relpath, d.ip "
-            "FROM downloads d LEFT JOIN users u ON u.email=d.email "
-            "LEFT JOIN events e ON e.id=d.event_id ORDER BY d.id DESC"):
-        row = [time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(r["ts"])), r["name"] or "",
-               r["phone"] or "", r["email"], r["album"], r["relpath"], r["ip"]]
-        # a cell that starts with = + - @ would be run as a formula by Excel
-        w.writerow([("'" + v) if isinstance(v, str) and v[:1] in "=+-@" else v for v in row])
+    sql, args, _ = _download_filter()
+
+    def rows():
+        c = db.connect()            # own connection: this runs after the request ended
+        try:
+            buf = io.StringIO()
+            w = csv.writer(buf)
+            w.writerow(["Time", "Name", "Phone", "Email", "Album", "Photo", "IP"])
+            yield "﻿" + buf.getvalue()
+            for r in c.execute(
+                    f"SELECT d.ts, u.name, u.phone, d.email, COALESCE(e.name, '') AS album, "
+                    f"d.relpath, d.ip {DL_FROM}{sql} ORDER BY d.id DESC", args):
+                row = [time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(r["ts"])),
+                       r["name"] or "", r["phone"] or "", r["email"], r["album"], r["relpath"],
+                       r["ip"]]
+                buf.seek(0)
+                buf.truncate()
+                # a cell that starts with = + - @ would be run as a formula by Excel
+                w.writerow([("'" + v) if isinstance(v, str) and v[:1] in "=+-@" else v
+                            for v in row])
+                yield buf.getvalue()
+        finally:
+            c.close()
     return app.response_class(
-        "\ufeff" + out.getvalue(), mimetype="text/csv",
+        rows(), mimetype="text/csv",
         headers={"Content-Disposition": "attachment; filename=facefind-downloads.csv"})
+
+
+@app.post("/admin/wrong")
+def admin_wrong():
+    """From the admin's own selfie test: 'this photo is another person'."""
+    if not is_admin() or request.headers.get("X-CSRF") != session.get("csrf"):
+        abort(403)
+    d = request.get_json(silent=True) or {}
+    try:
+        score, pid = float(d.get("score")), int(d.get("id"))
+    except (TypeError, ValueError):
+        abort(400)
+    c = con()
+    c.execute("INSERT INTO wrong_reports(ts,email,photo_id,score) VALUES(?,?,?,?)",
+              (time.time(), "admin test", pid, score))
+    c.commit()
+    return jsonify(ok=True)
+
+
+def wrong_summary(c):
+    """What the 'not me' reports say about the right strictness."""
+    since = time.time() - 60 * 86400
+    n, top = c.execute("SELECT COUNT(*), MAX(score) FROM wrong_reports WHERE ts>?",
+                       (since,)).fetchone()
+    if not n:
+        return None
+    above = c.execute("SELECT COUNT(*) FROM wrong_reports WHERE ts>? AND score>=?",
+                      (since, config.MATCH_THRESHOLD)).fetchone()[0]
+    return dict(n=n, top=top, above=above, suggest=min(0.80, round(top + 0.02, 2)))
 
 
 @app.post("/admin/settings")

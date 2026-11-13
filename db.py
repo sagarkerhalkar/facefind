@@ -45,6 +45,11 @@ CREATE TABLE IF NOT EXISTS promos(
   id INTEGER PRIMARY KEY, kind TEXT, title TEXT, body TEXT, link TEXT, event_date TEXT,
   show_before INTEGER DEFAULT 1, show_after INTEGER DEFAULT 1, active INTEGER DEFAULT 1,
   created_at REAL);
+CREATE TABLE IF NOT EXISTS wrong_reports(
+  id INTEGER PRIMARY KEY, ts REAL, email TEXT, photo_id INTEGER, score REAL);
+CREATE INDEX IF NOT EXISTS downloads_ts ON downloads(ts);
+CREATE INDEX IF NOT EXISTS downloads_event ON downloads(event_id);
+CREATE INDEX IF NOT EXISTS users_login ON users(last_login);
 CREATE TABLE IF NOT EXISTS scan_errors(
   event_id INTEGER, relpath TEXT, reason TEXT);
 CREATE INDEX IF NOT EXISTS scan_errors_event ON scan_errors(event_id);

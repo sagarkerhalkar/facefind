@@ -91,7 +91,16 @@
             }, { once: true });
             const cap = document.createElement("figcaption");
             cap.textContent = "score " + ph.score.toFixed(2);
-            fig.append(img, cap); grid.append(fig);
+            const no = document.createElement("button");
+            no.type = "button"; no.className = "small danger"; no.textContent = "Wrong person";
+            no.addEventListener("click", async () => {
+              no.disabled = true;
+              await fetch("/admin/wrong", { method: "POST",
+                headers: { "Content-Type": "application/json", "X-CSRF": box.dataset.csrf },
+                body: JSON.stringify({ id: ph.id, score: ph.score }) });
+              no.textContent = "Noted - see Settings";
+            });
+            fig.append(img, cap, no); grid.append(fig);
           });
         }
       } catch (e) { tell("No connection to the app."); }
