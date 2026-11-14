@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#16132d">
 <title>Admin - {{ brand }}</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=5">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v={{ static_v('style.css') }}">
 <link rel="stylesheet" href="{{ url_for('brand_theme') }}?v={{ studio.v }}">
 </head>
 <body><div class="admin">
@@ -206,7 +206,7 @@
 <label class="check"><input type="checkbox" name="remove_background"><span>Remove the picture</span></label>{% endif %}
 <input id="background" name="background" type="file" accept="image/*"></div>
 </div>
-<label class="check"><input type="checkbox" name="stamp" {{ 'checked' if stamp }}><span>Put the logo, small, in the top right corner of every downloaded photo. JPG, PNG, WEBP and TIFF are sent as JPG with the logo; RAW and HEIC files are sent unchanged.</span></label>
+<label class="check"><input type="checkbox" name="stamp" {{ 'checked' if stamp }}><span>Put the logo, small, in the top right corner of every downloaded photo. JPG, PNG, WEBP and TIFF are sent as JPG with the logo; iPhone HEIC photos get the logo too. Camera RAW files (ARW, CR2, NEF ...) are sent unchanged, because turning them into JPG would lose the RAW.</span></label>
 <button type="submit">Save look</button>
 </form>
 
@@ -300,5 +300,5 @@
 </table></div></details>
 {% endif %}
 </main></div>
-<script src="{{ url_for('static', filename='admin.js') }}?v=6"></script>
+<script src="{{ url_for('static', filename='admin.js') }}?v={{ static_v('admin.js') }}"></script>
 </body></html>

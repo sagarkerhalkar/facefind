@@ -132,3 +132,5 @@ OTHER_EXT = {".gif", ".psd", ".mp4", ".mov", ".avi", ".pdf"}   # seen but not ph
 DB_WAL = os.environ.get("DB_WAL", "0").strip().lower() in ("1", "true", "yes", "on")
 BACKUP_EVERY_MIN = int(os.environ.get("BACKUP_EVERY_MIN", "20") or 20)
 BACKUPS_KEPT = int(os.environ.get("BACKUPS_KEPT", "6") or 6)
+
+CACHE_REFRESH = float(os.environ.get("CACHE_REFRESH", "8"))      # seconds between refreshes while a scan runs

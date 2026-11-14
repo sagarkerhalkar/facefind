@@ -20,7 +20,10 @@ import faces
 import gdrive
 
 progress = {}          # event_id -> dict(state, done, total, faces, error, ...)
-_cache = {}            # event_id -> (matrix, photo_ids)
+_cache = {}            # event_id -> (matrix, photo_ids, face widths)
+_dirty = set()         # albums changed by a running scan (cache is a little old)
+_built = {}            # event_id -> when the cache was made
+_build_locks = {}
 _cache_lock = threading.Lock()
 BATCH = 48
 
@@ -142,9 +145,15 @@ def _batches(q):
         yield batch
 
 
-def _drop_cache(event_id):
+def _drop_cache(event_id, soft=False):
+    """soft: a running scan added photos - keep serving the matrix that is in
+    memory and refresh it in the background (see _matrix). Otherwise forget it."""
     with _cache_lock:
-        _cache.pop(event_id, None)
+        if soft and event_id in _cache:
+            _dirty.add(event_id)
+        else:
+            _cache.pop(event_id, None)
+            _dirty.discard(event_id)
 
 
 def preview_path(row, small=False):
@@ -291,7 +300,7 @@ def index_event(event_id):
                     job["thumb"] = None
                 if todo:
                     con.commit()                # guests can already find these photos
-                    _drop_cache(event_id)
+                    _drop_cache(event_id, soft=True)
         # Remove from the index: photos deleted from a source that was read
         # completely, and photos of sources taken off the album's list.
         for (root, rel), (pid, _, _) in known.items():
@@ -316,8 +325,14 @@ def index_event(event_id):
     except Exception as e:
         st.update(state="failed", error=str(e), phase="")
     finally:
+        _drop_cache(event_id, soft=True)
+        with _cache_lock:
+            _built[event_id] = 0              # refresh at once, guests keep the old one meanwhile
+        try:
+            _matrix(con, event_id)
+        except Exception:
+            _drop_cache(event_id)
         con.close()
-        _drop_cache(event_id)
 
 
 def timing(st):
@@ -348,22 +363,80 @@ def start_index(event_id):
     return True
 
 
+def _build(con, event_id):
+    """Reads every face signature of an album into one array (fast: the raw
+    bytes are joined and read in one go)."""
+    blobs, ids, sizes = [], [], []
+    width = 0
+    cur = con.execute("SELECT photo_id, embedding, size FROM faces WHERE event_id=?", (event_id,))
+    while True:
+        rows = cur.fetchmany(20000)
+        if not rows:
+            break
+        for pid, blob, size in rows:
+            if not width:
+                width = len(blob)
+            if len(blob) != width:
+                continue
+            blobs.append(blob)
+            ids.append(pid)
+            try:
+                sizes.append(float(size or 0))
+            except ValueError:
+                sizes.append(0.0)
+    if not blobs:
+        return np.zeros((0, 1), np.float32), np.array([], int), np.zeros(0, np.float32)
+    m = np.frombuffer(b"".join(blobs), np.float32).reshape(len(blobs), -1)
+    return m, np.array(ids), np.array(sizes, np.float32)
+
+
 def _matrix(con, event_id):
-    """(signatures, photo ids, face widths) of an album, kept in memory."""
+    """(signatures, photo ids, face widths) of an album, kept in memory.
+    Many guests at once never read the album more than once; while a scan is
+    adding photos the matrix is refreshed at most every CACHE_REFRESH seconds
+    and guests keep using the one that is there."""
     with _cache_lock:
-        if event_id in _cache:
-            return _cache[event_id]
-    rows = con.execute("SELECT photo_id, embedding, size FROM faces WHERE event_id=?",
-                       (event_id,)).fetchall()
-    if rows:
-        m = np.vstack([np.frombuffer(r["embedding"], np.float32) for r in rows])
-        ids = np.array([r["photo_id"] for r in rows])
-        sizes = np.array([float(r["size"] or 0) for r in rows], np.float32)
+        hit = _cache.get(event_id)
+        stale = (hit is not None and event_id in _dirty
+                 and time.time() - _built.get(event_id, 0) >= config.CACHE_REFRESH)
+        lock = _build_locks.setdefault(event_id, threading.Lock())
+    if hit is not None and not stale:
+        return hit
+    if hit is not None:                       # one thread refreshes, the others use the old one
+        if not lock.acquire(blocking=False):
+            return hit
     else:
-        m, ids, sizes = np.zeros((0, 1), np.float32), np.array([], int), np.zeros(0, np.float32)
-    with _cache_lock:
-        _cache[event_id] = (m, ids, sizes)
-    return m, ids, sizes
+        lock.acquire()
+        with _cache_lock:
+            hit = _cache.get(event_id)
+        if hit is not None:
+            lock.release()
+            return hit
+    try:
+        with _cache_lock:
+            _dirty.discard(event_id)          # a batch that lands during the build marks it again
+        built = _build(con, event_id)
+        with _cache_lock:
+            _cache[event_id] = built
+            _built[event_id] = time.time()
+        return built
+    finally:
+        lock.release()
+
+
+def warm_all():
+    """Reads every open album into memory when the app starts, so the first
+    guest does not wait for it."""
+    def run():
+        c = db.connect()
+        try:
+            for r in c.execute("SELECT id FROM events WHERE active=1").fetchall():
+                _matrix(c, r["id"])
+        except Exception:
+            pass
+        finally:
+            c.close()
+    threading.Thread(target=run, daemon=True).start()
 
 
 def match(m, sizes, vec, threshold=None):

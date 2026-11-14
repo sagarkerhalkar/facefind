@@ -249,6 +249,14 @@ search, and browsers may keep previews for an hour.
 
 ---
 
+## 14 November, 12:16
+
+**You:** "app is too slow in all way loading, selfy catching, photo loading every thing why and still bug on data base, face loading, every where, and after downloading logo is not there why" (after: the tunnel showed Cloudflare 502; app answered 200 on http and https locally).
+
+**Reply (short):** Tunnel: use Type HTTP, URL 127.0.0.1:8787 and `TRUST_PROXY=1`. Slowness found in the code: while a scan runs, the in-memory face list of the album was thrown away after every batch, so each guest's selfie search re-read the whole album from the database (now kept in memory, refreshed at most every 8 s during a scan, built once at start-up, one build shared by all guests). Static files were re-checked on every page load (now cached for a year, address changes with the file). Anything over 1 second is written to `data\error.log` as `SLOW`. Logo on downloads was OFF unless ticked in Brand; now ON by default (switched on once for existing installs), HEIC photos stamped too, RAW stays unchanged.
+
+---
+
 ## Still open
 
 - Wrong person in selfie results. Waiting for two answers from the owner:
