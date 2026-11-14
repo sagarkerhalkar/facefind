@@ -94,7 +94,7 @@ DOWNLOAD_LINK_TTL = 120    # seconds
 # compared with thousands of faces that lets other people through, so the
 # default is stricter. It can be changed on the admin page ("Match strictness").
 _thr = os.environ.get("MATCH_THRESHOLD", "").strip()
-MATCH_THRESHOLD = float(_thr) if _thr not in ("", "0.40", "0.363") else 0.45
+MATCH_THRESHOLD = float(_thr) if _thr not in ("", "0.40", "0.363") else 0.50
 MAX_RESULTS = 500
 # A small copy of every photo with a face is kept from the scan (about 30 KB
 # each), so the photo page loads at once - also for photos on Google Drive.
