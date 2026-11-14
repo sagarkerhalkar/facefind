@@ -19,12 +19,18 @@ DEFAULTS = {
     "brand": config.BRAND,
     "tagline": "Every photo you are in, found with one selfie.",
     "accent": "#E8A317",          # marigold
-    "stamp": "0",                 # 1 = put the logo on downloaded photos
+    "stamp": "1",                 # 1 = put the logo on downloaded photos (default ON)
     "scan_side": str(config.SCAN_SIDE),
     "look_first": "1",            # 1 = guests may see previews before signing in
 }
 COLOUR_RE = re.compile(r"#[0-9a-fA-F]{6}")
 STAMPABLE = {".jpg", ".jpeg", ".jpe", ".jfif", ".png", ".webp", ".bmp", ".tif", ".tiff"}
+try:                                    # iPhone photos can be stamped too
+    import pillow_heif
+    pillow_heif.register_heif_opener()
+    STAMPABLE |= {".heic", ".heif"}
+except Exception:
+    pass
 
 
 def get(c, key):

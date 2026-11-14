@@ -133,6 +133,11 @@ def _crash(e):
 
 
 @app.before_request
+def _clock():
+    g.t0 = time.time()
+
+
+@app.before_request
 def _guests_first():
     # While guests are using the site the scan slows down a little, so pages
     # and photos stay quick (see indexer._embed_file).
@@ -174,6 +179,9 @@ def _csrf_guard():
 
 @app.after_request
 def _headers(r):
+    took = time.time() - g.get("t0", time.time())
+    if took > 1.0:                 # anything slower than a second is written down
+        _elog.warning("SLOW %.1fs  %s %s -> %s", took, request.method, request.full_path, r.status_code)
     r.headers["Content-Security-Policy"] = (
         "default-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; "
         "style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'none'")
@@ -187,7 +195,10 @@ def _headers(r):
         r.headers["Cache-Control"] = "public, max-age=86400"      # addresses carry a version
     elif r.headers.pop("X-Keep", None) and r.status_code == 200:
         r.headers["Cache-Control"] = "private, max-age=3600"      # previews: this browser only
-    elif not request.path.startswith("/static/"):
+    elif request.path.startswith("/static/"):
+        if request.args.get("v") and r.status_code == 200:      # the address changes with the file
+            r.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    else:
         r.headers["Cache-Control"] = "no-store"
     return r
 
@@ -368,11 +379,20 @@ def make_preview(src, dest, ext="", side=None):
     os.replace(tmp, dest)
 
 
+def _static_v(name):
+    """Changes whenever the file changes, so browsers keep it for a year but
+    always get the new one after an update."""
+    try:
+        return int((Path(app.static_folder) / name).stat().st_mtime)
+    except OSError:
+        return 0
+
+
 # ------------------------------------------------- studio look and promotions
 @app.context_processor
 def _studio():
     c = con()
-    return dict(brand=config.BRAND, studio=dict(
+    return dict(brand=config.BRAND, static_v=_static_v, studio=dict(
         tagline=brand.get(c, "tagline"), logo=brand.LOGO.exists(),
         background=brand.BACKGROUND.exists(), v=brand.version() + brand.get(c, "accent")[1:]))
 
@@ -1638,6 +1658,7 @@ def _delete_album(c, eid):
         c.execute(sql, (eid,))
     db.kv_set(c, f"scanning:{eid}", None)
     indexer.progress.pop(eid, None)
+    indexer._drop_cache(eid)
     db.audit(c, "album_deleted", event_id=eid, detail=ev["name"], ip=ip())
     return f"Album \"{ev['name']}\" deleted. Your original photos were not touched."
 
@@ -1841,6 +1862,7 @@ def startup_checks():
 
 def main():
     startup_checks()
+    indexer.warm_all()                      # every open album in memory before the first guest
     host = config.HOST
     try:                                    # one fixed port, remembered in data/port.txt
         port = netutil.sticky_port(host, config.PORT, config.DATA_DIR / "port.txt")

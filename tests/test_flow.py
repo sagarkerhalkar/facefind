@@ -671,6 +671,27 @@ try:
 finally:
     config.DB_PATH = _live
 print("ok  damaged database is kept aside, rebuilt, and the app starts")
+# the face matrix stays in memory while a scan adds photos, and refreshes later
+import numpy as np, brand as _brand
+_c = _db.connect()
+def _faces(n):
+    for _ in range(n):
+        _c.execute("INSERT INTO faces(photo_id,event_id,embedding,size) VALUES(1,9999,?,?)",
+                   (np.random.rand(128).astype(np.float32).tobytes(), "90"))
+    _c.commit()
+_faces(5)
+assert len(indexer._matrix(_c, 9999)[1]) == 5
+_faces(3); indexer._drop_cache(9999, soft=True)
+assert len(indexer._matrix(_c, 9999)[1]) == 5                # still the one in memory (fresh enough)
+_old = config.CACHE_REFRESH; config.CACHE_REFRESH = 0
+assert len(indexer._matrix(_c, 9999)[1]) == 8                # refreshed
+config.CACHE_REFRESH = _old
+indexer._drop_cache(9999); _c.execute("DELETE FROM faces WHERE event_id=9999"); _c.commit(); _c.close()
+assert _brand.DEFAULTS["stamp"] == "1"                       # logo on downloads is on by default
+_r = pub.get("/static/style.css?v=1"); assert "immutable" in _r.headers["Cache-Control"]
+assert "static/style.css?v=" in pub.get("/").get_data(as_text=True)
+print("ok  matrix kept in memory during a scan; logo on by default; static files cached")
+
 # one port answers both http:// and https://, by 127.0.0.1 and by localhost
 import socket, ssl, threading, urllib.request, netutil
 from flask import Flask as _F

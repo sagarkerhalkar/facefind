@@ -61,6 +61,7 @@ over many drives:
 | 28 | "I should be able to delete the old event also" (14 Nov 11:11) | "Delete this album" on every album: removes photo list, faces, saved photos and small copies; originals untouched; download report kept; refused while a scan runs. Test added. |
 | 29 | Database "malformed" again while running; old albums lost; slow with 10-15 guests (14 Nov 11:39) | Safe journal mode by default (`DB_WAL=1` to opt in), backups every 20 min in `data/backups`, repair starts from the newest backup, restart on runtime damage (`start.bat`/`start.sh` loop, exit code 3), scan yields to guests and runs below normal priority, 32 web threads, `.env.example` note to keep `DATA_DIR` on a local disk. Tests: backup restore. |
 | 30 | Web link not working: 127.0.0.1 vs localhost, http vs https "always changing"; wants fewer errors (14 Nov 11:53) | One port answers http:// and https:// (first byte decides), on 127.0.0.1, localhost, LAN, IPv6 where available; browser opens on 127.0.0.1; start-up "Web check" prints which addresses work; README tunnel note. Test added. |
+| 31 | Slow everywhere; logo missing on downloads (14 Nov 12:16) | Face matrix no longer dropped on every scan batch (stale-while-refresh, `CACHE_REFRESH`, single build, warm at start-up, faster build); static files cached with file-version addresses; `SLOW` log lines for requests over 1 s; logo on downloads default ON (one-time switch-on), HEIC stamped; album delete clears the cache. Tests added. |
 
 ## Files a user runs
 

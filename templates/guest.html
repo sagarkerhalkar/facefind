@@ -15,7 +15,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0d0b1a">
 <title>{{ event.name if event else ("Find your photos" if portal else "Link not found") }} - {{ brand }}</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=6">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v={{ static_v('style.css') }}">
 <link rel="stylesheet" href="{{ url_for('brand_theme') }}?v={{ studio.v }}">
 </head>
 <body class="guest">
@@ -133,6 +133,6 @@
 {% endif %}
 </main>
 </div>
-<script src="{{ url_for('static', filename='app.js') }}?v=6"></script>
+<script src="{{ url_for('static', filename='app.js') }}?v={{ static_v('app.js') }}"></script>
 </body>
 </html>

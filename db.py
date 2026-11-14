@@ -210,6 +210,11 @@ def init():
     if not con.execute("SELECT 1 FROM kv WHERE k='approval_off_done'").fetchone():
         con.execute("UPDATE events SET require_approval=0")
         con.execute("INSERT INTO kv(k,v) VALUES('approval_off_done','1')")
+    # The logo on downloads was off unless ticked; it is now on by default,
+    # and switched on once for albums that had saved it as off.
+    if not con.execute("SELECT 1 FROM kv WHERE k='stamp_on_done'").fetchone():
+        con.execute("INSERT INTO kv(k,v) VALUES('set:stamp','1') ON CONFLICT(k) DO UPDATE SET v='1'")
+        con.execute("INSERT INTO kv(k,v) VALUES('stamp_on_done','1')")
     con.commit()
     con.close()
 
