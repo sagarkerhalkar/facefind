@@ -241,6 +241,14 @@ search, and browsers may keep previews for an hour.
 
 ---
 
+## 14 November, 11:53
+
+**You:** "again you change from 127.0.0.1 to local host so cloudflare web not working and same mistake app is too slow data base error what the hell i want 127, localhost all working i want proper thing always not change from http to https lots of thing not why and error error its wrong, i want error less"
+
+**Reply (short):** The browser was opened on `localhost` while the tunnel uses `127.0.0.1`, and the app only answered one of http/https (and only on IPv4). Now one port answers both `http://` and `https://`, on `127.0.0.1`, `localhost` and the LAN address (IPv6 too where the PC has it), whatever the tunnel is set to. The start-up window prints a "Web check" listing which addresses work. The database damage and slowness fixes from 11:39 need `git pull` to take effect.
+
+---
+
 ## Still open
 
 - Wrong person in selfie results. Waiting for two answers from the owner:

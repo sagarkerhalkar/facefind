@@ -671,4 +671,18 @@ try:
 finally:
     config.DB_PATH = _live
 print("ok  damaged database is kept aside, rebuilt, and the app starts")
+# one port answers both http:// and https://, by 127.0.0.1 and by localhost
+import socket, ssl, threading, urllib.request, netutil
+from flask import Flask as _F
+_app = _F("dual"); _app.add_url_rule("/x", "x", lambda: "pong")
+_so = socket.socket(); _so.bind(("127.0.0.1", 0)); _pt = _so.getsockname()[1]; _so.close()
+_cert, _key = netutil.ensure_cert(config.DATA_DIR / "tls-dual", ["localhost", "127.0.0.1"])
+threading.Thread(target=netutil.serve_dual, args=(_app, "127.0.0.1", _pt, _cert, _key), daemon=True).start()
+_ctx = ssl.create_default_context(); _ctx.check_hostname = False; _ctx.verify_mode = ssl.CERT_NONE
+for _i in range(50):
+    try: urllib.request.urlopen(f"http://127.0.0.1:{_pt}/x", timeout=3); break
+    except Exception: time.sleep(0.1)
+for _u in (f"http://127.0.0.1:{_pt}/x", f"https://127.0.0.1:{_pt}/x", f"http://localhost:{_pt}/x", f"https://localhost:{_pt}/x"):
+    assert urllib.request.urlopen(_u, timeout=5, context=_ctx).read() == b"pong", _u
+print("ok  one port answers http and https on 127.0.0.1 and localhost")
 print("ALL TESTS PASSED")

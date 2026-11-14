@@ -86,6 +86,9 @@ last line instead of `start-web.bat`:
     cloudflared.exe tunnel create facefind
     cloudflared.exe tunnel route dns facefind photos.yourdomain.com
     cloudflared.exe tunnel run --url https://127.0.0.1:PORT --no-tls-verify facefind
+    (the app's one port answers http:// and https://, by 127.0.0.1 and by localhost,
+    so a tunnel origin of http://127.0.0.1:PORT or https://localhost:PORT works too;
+    the start-up window prints a "Web check" with the addresses that work)
 
 (PORT is the number in `data/port.txt`) and put `TRUST_PROXY=1` and
 `PUBLIC_URL=https://photos.yourdomain.com` in `.env`.
