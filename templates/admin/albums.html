@@ -1,0 +1,92 @@
+{% extends layout %}
+{% block view %}
+<div class="view">
+<div class="head"><div><h1>Albums</h1></div><div class="sp"></div>
+  <button type="button" class="accent" id="new-open"><svg class="ic"><use href="#i-plus"/></svg> New album</button></div>
+<div class="stats">
+  <div class="stat"><span class="ico"><svg class="ic"><use href="#i-albums"/></svg></span><div><b>{{ "{:,}".format(totals.albums) }}</b><span>albums</span></div></div>
+  <div class="stat"><span class="ico"><svg class="ic"><use href="#i-camera"/></svg></span><div><b>{{ "{:,}".format(totals.photos) }}</b><span>photos scanned</span></div></div>
+  <div class="stat"><span class="ico"><svg class="ic"><use href="#i-users"/></svg></span><div><b>{{ "{:,}".format(totals.guests) }}</b><span>guests signed in</span></div></div>
+  <div class="stat"><span class="ico"><svg class="ic"><use href="#i-download"/></svg></span><div><b>{{ "{:,}".format(totals.downloads) }}</b><span>photos downloaded</span></div></div>
+</div>
+
+{% if pending %}
+<div class="card"><h2>People waiting for your OK</h2><div class="scroll"><table>
+<tr><th>Their selfie</th><th>Email</th><th>Album</th><th>Photos found</th><th></th></tr>
+{% for p in pending %}<tr>
+<td><img class="selfie" src="{{ url_for('admin_selfie', sid=p.id) }}" alt="Selfie sent by {{ p.email }}"></td>
+<td>{{ p.email or "(not signed in)" }}</td><td>{{ p.name }}{% if p.date_from %} ({{ p.date_from }} to {{ p.date_to }}){% endif %}</td><td>{{ p.n }}</td>
+<td><form class="inline" method="post" action="{{ url_for('admin_request', sid=p.id, action='approve') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small">Give photos</button></form>
+<form class="inline" method="post" action="{{ url_for('admin_request', sid=p.id, action='reject') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small danger ghost">Refuse</button></form></td>
+</tr>{% endfor %}</table></div></div>
+{% endif %}
+
+{% if portal_link %}
+<div class="card">
+  <div class="head tight"><h2>One link for all events</h2><span class="pill on">Send this to everyone</span></div>
+  <div class="linkrow"><input id="plink" type="text" readonly value="{{ portal_link }}" aria-label="General guest link">
+    <button type="button" data-copy="{{ portal_link }}"><svg class="ic"><use href="#i-link"/></svg> Copy link</button></div>
+  <p class="hint">The guest signs in once, picks dates, ticks their events, takes one selfie and gets their photos. Albums without a date are not included.</p>
+</div>
+{% endif %}
+
+<form class="toolbar" method="get" action="{{ url_for('admin') }}" role="search" data-live>
+  <input type="search" name="q" value="{{ q }}" placeholder="Search albums by name or date (2026-11)" aria-label="Search albums" autocomplete="off">
+  <select name="show" aria-label="Show"><option value="">All albums</option><option value="open" {{ 'selected' if show == 'open' }}>Link open</option><option value="closed" {{ 'selected' if show == 'closed' }}>Link closed</option></select>
+  <button type="submit" class="ghost"><svg class="ic"><use href="#i-search"/></svg> Search</button>
+  {% if q or show %}<a class="btn ghost" href="{{ url_for('admin') }}">Clear</a>{% endif %}
+</form>
+<p class="hint">{{ "{:,}".format(total) }} album{{ '' if total == 1 else 's' }}{% if q %} matching "{{ q }}"{% endif %}.</p>
+
+<div class="albums" id="albums">
+{% for e in events %}{% include "admin/_album.html" %}
+{% else %}<div class="card empty-state"><div class="big"><svg class="ic"><use href="#i-albums"/></svg></div>
+<h2>{{ "No album matches this search." if q or show else "Create your first album" }}</h2>
+<p class="hint">{{ "Try another name or date." if q or show else "Paste a Google Drive folder link or choose a folder on this computer. Photos stay where they are." }}</p>
+{% if not q and not show %}<button type="button" class="accent" data-open-new><svg class="ic"><use href="#i-plus"/></svg> New album</button>{% endif %}</div>{% endfor %}
+</div>
+{% if pages > 1 %}<nav class="pager" aria-label="Pages">
+{% if page_no > 1 %}<a class="btn ghost small" href="{{ url_for('admin', q=q, page=page_no-1, show=show) }}">Previous</a>{% endif %}
+<span>Page {{ page_no }} of {{ pages }}</span>
+{% if page_no < pages %}<a class="btn ghost small" href="{{ url_for('admin', q=q, page=page_no+1, show=show) }}">Next</a>{% endif %}
+</nav>{% endif %}
+
+<dialog id="new-sheet" class="right"><form class="sheet" method="post" action="{{ url_for('admin_event_create') }}"><input type="hidden" name="csrf" value="{{ csrf }}">
+  <div class="sheet-head"><h2>New album</h2><button type="button" class="ghost icon-btn" data-close aria-label="Close"><svg class="ic"><use href="#i-x"/></svg></button></div>
+  <div class="sheet-body">
+    <div class="row"><div><label for="name">Album name (guests see this)</label>
+    <input id="name" name="name" type="text" required placeholder="Sharma wedding" autocomplete="off"></div>
+    <div><label for="event_date">Date of the event</label>
+    <input id="event_date" name="event_date" type="date" value="{{ today }}"></div></div>
+    <label for="folders">Where are the photos?</label>
+    <textarea id="folders" name="folders" rows="4" required placeholder="https://drive.google.com/drive/folders/...   or   D:\Photos\Sharma"></textarea>
+    <p class="hint">One per line. Paste a Google Drive folder link, or choose a folder on this computer or any connected drive. You can mix both. Photos on Drive are scanned there - nothing is copied.{% if not drive_email %} <b>Google Drive is not connected yet{% if owner %} - connect it under Settings{% else %} - ask the owner{% endif %}.</b>{% endif %}</p>
+    {% if drive_email %}<p class="hint">Share each Drive folder with <code>{{ drive_email }}</code> (Viewer) before pasting its link.</p>{% endif %}
+    <button type="button" class="ghost small" id="browse-open"><svg class="ic"><use href="#i-folder"/></svg> Choose folder on this computer</button>
+    <div id="browser" class="browser" hidden>
+      <div class="browser-head"><button type="button" class="small ghost" id="b-up">Back</button> <span id="b-path"></span></div>
+      <ul id="b-list"></ul>
+      <div><button type="button" class="small" id="b-pick">Use this folder</button> <span id="b-count" class="hint"></span>
+      <button type="button" class="small ghost" id="b-close">Close</button></div>
+    </div>
+    <label class="check"><input type="checkbox" name="approval"><span>Ask me before giving photos to a guest</span></label>
+    <p class="hint">Photo types read: JPG, PNG, WEBP, BMP, TIFF, HEIC (iPhone) and camera RAW files (ARW, CR2, CR3, NEF, DNG, RAF, RW2, ORF and more).</p>
+  </div>
+  <div class="sheet-foot"><button type="button" class="ghost" data-close>Cancel</button><button type="submit" class="accent">Create album and scan photos</button></div>
+</form></dialog>
+
+<dialog id="tester" class="right"><div class="sheet" data-csrf="{{ csrf }}">
+  <div class="sheet-head"><h2 id="t-title">Test with a selfie</h2><button type="button" class="ghost icon-btn" data-close aria-label="Close"><svg class="ic"><use href="#i-x"/></svg></button></div>
+  <div class="sheet-body">
+    <p class="hint">Works like the guest page, without email or code. You see each photo's score.</p>
+    <button type="button" class="small t-open"><svg class="ic"><use href="#i-camera"/></svg> Open camera</button>
+    <div class="cam small-cam" hidden><video autoplay playsinline muted></video></div>
+    <button type="button" class="small t-snap" hidden>Take selfie and test</button>
+    <label for="t-file">Or choose a clear photo of one person's face</label>
+    <input id="t-file" class="t-file" type="file" accept="image/*">
+    <p class="status t-result" role="status" hidden></p>
+    <div class="grid t-grid"></div>
+  </div>
+</div></dialog>
+</div>
+{% endblock %}

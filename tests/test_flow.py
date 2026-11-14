@@ -221,8 +221,15 @@ class Stream(io.BytesIO):
     headers = {"Content-Type": "image/png"}
 gdrive.fetch_small, gdrive.fetch_full = fake_small, fake_full
 gdrive.open_original = lambda file_id: Stream(png(colors[file_id]))
-bad = adm.post("/admin/events", data={"name": "X", "csrf": csrf, "folders": "https://drive.google.com/drive/folders/ZZZZZZZZZZZZZZ"}, follow_redirects=True)
-assert b"Share it with robot@proj" in bad.data
+t0 = time.time()
+adm.post("/admin/events", data={"name": "X", "csrf": csrf, "folders": "https://drive.google.com/drive/folders/ZZZZZZZZZZZZZZ"}, follow_redirects=True)
+assert time.time() - t0 < 2, "adding an album never waits for Google"
+xe = con.execute("SELECT id FROM events WHERE name='X'").fetchone()
+for _ in range(100):
+    if indexer.progress.get(xe["id"], {}).get("state") in ("finished", "failed"): break
+    time.sleep(0.1)
+assert "Share it with robot@proj" in adm.get("/admin/status").json[str(xe["id"])]["text"]   # the scan says so, on the card
+assert b"deleted" in adm.post(f"/admin/events/{xe['id']}/delete", data={"csrf": csrf}, follow_redirects=True).data
 old_copy = config.DRIVE_DIR / FID; old_copy.mkdir(parents=True); (old_copy / "left-over.jpg").write_bytes(b"x")   # from an older version
 adm.post("/admin/events", data={"name": "Drive", "csrf": csrf, "folders": f"https://drive.google.com/drive/folders/{FID}?usp=sharing"})
 dev = con.execute("SELECT * FROM events WHERE name='Drive'").fetchone()
@@ -441,7 +448,7 @@ st = A.app.test_client()
 assert b"Wrong user name or password" in st.post("/admin/login", data={"username": "ravi", "password": "nope-nope"}).data
 assert st.post("/admin/login", data={"username": "ravi", "password": "ravi-pass-1"}).status_code == 302
 spage = st.get("/admin").get_data(as_text=True); scsrf = re.search(r'name="csrf" value="(\w+)"', spage).group(1)
-assert "Signed in as ravi" in spage and "Guests and downloads" not in spage and "Add a new album" in spage
+assert "<b>ravi</b>" in spage and 'href="/admin/guests"' not in spage and "New album" in spage and "/admin/speed" not in spage
 for path in ("/admin/guests", "/admin/brand", "/admin/team", "/admin/settings"):
     assert st.get(path).status_code == 302, path
 assert st.get("/admin/downloads.csv").status_code == 403
@@ -465,10 +472,10 @@ for i in range(23):
     con.execute("INSERT INTO events(name,code,folders,created_at,event_date) VALUES(?,?,?,?,?)", (f"Bulk {i:02d}", f"bulk{i}", "", time.time(), "2031-05-01"))
 con.commit()
 p1 = adm.get("/admin").get_data(as_text=True)
-assert p1.count('<details class="album"') == 20 and "Page 1 of" in p1 and "Bulk 22" in p1 and "Bulk 01" not in p1
+assert p1.count('<article class="album-card') == 20 and "Page 1 of" in p1 and "Bulk 22" in p1 and "Bulk 01" not in p1
 assert "Bulk 01" in adm.get("/admin?page=2").get_data(as_text=True)
-one = adm.get("/admin?q=Bulk 07").get_data(as_text=True); assert one.count('<details class="album"') == 1 and "1 album matching" in one
-assert adm.get("/admin?q=2031-05").get_data(as_text=True).count('<details class="album"') == 20
+one = adm.get("/admin?q=Bulk 07").get_data(as_text=True); assert one.count('<article class="album-card') == 1 and "1 album matching" in one
+assert adm.get("/admin?q=2031-05").get_data(as_text=True).count('<article class="album-card') == 20
 assert adm.get("/admin?q=zzzz").get_data(as_text=True).count("No album matches this search") == 1
 assert list(adm.get(f"/admin/status?ids={sid_}").json) == [str(sid_)]
 con.execute("DELETE FROM events WHERE name LIKE 'Bulk %'"); con.commit()
@@ -691,6 +698,21 @@ assert _brand.DEFAULTS["stamp"] == "1"                       # logo on downloads
 _r = pub.get("/static/style.css?v=1"); assert "immutable" in _r.headers["Cache-Control"]
 assert "static/style.css?v=" in pub.get("/").get_data(as_text=True)
 print("ok  matrix kept in memory during a scan; logo on by default; static files cached")
+
+# admin: page changes without reloads, live status numbers, speed check
+full = adm.get("/admin").get_data(as_text=True); frag = adm.get("/admin", headers={"X-PJAX": "1"}).get_data(as_text=True)
+assert "<nav" in full and "<nav class=\"side\"" not in frag and 'class="albums"' in frag, "pjax gets only the page"
+for path in ("/admin", "/admin/guests", "/admin/brand", "/admin/team", "/admin/settings", "/admin/speed"):
+    assert adm.get(path).status_code == 200, path
+sp = adm.get("/admin/speed/run").json
+assert sp["db_commit_ms"] is not None and sp["tips"] and "routes" in sp and sp["folders_checked"] >= 1
+assert A.app.test_client().get("/admin/speed/run").status_code == 403
+_ki = gdrive.key_info; gdrive.key_info = lambda: None          # no Google key set up
+try: assert adm.get("/admin/speed/run").status_code == 200
+finally: gdrive.key_info = _ki
+assert "Server-Timing" in adm.get("/admin/ping").headers
+stt = adm.get("/admin/status").json; assert all({"photos", "faces", "state", "running"} <= set(v) for v in stt.values())
+print("ok  admin: page fragments, live numbers, speed check")
 
 # one port answers both http:// and https://, by 127.0.0.1 and by localhost
 import socket, ssl, threading, urllib.request, netutil

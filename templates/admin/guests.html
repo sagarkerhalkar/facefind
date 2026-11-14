@@ -1,0 +1,39 @@
+{% extends layout %}
+{% block view %}
+<div class="view">
+<div class="head"><h1>Guests and downloads</h1></div>
+<div class="stats">
+  <div class="stat"><span class="ico"><svg class="ic"><use href="#i-download"/></svg></span><div><b>{{ "{:,}".format(totals.today) }}</b><span>photos downloaded today</span></div></div>
+  <div class="stat"><span class="ico"><svg class="ic"><use href="#i-download"/></svg></span><div><b>{{ "{:,}".format(totals.week) }}</b><span>in the last 7 days</span></div></div>
+  <div class="stat"><span class="ico"><svg class="ic"><use href="#i-download"/></svg></span><div><b>{{ "{:,}".format(totals.all) }}</b><span>in total</span></div></div>
+  <div class="stat"><span class="ico"><svg class="ic"><use href="#i-download"/></svg></span><div><b>{{ "{:,}".format(totals.guests) }}</b><span>guests signed in</span></div></div>
+</div>
+<form class="toolbar" method="get" action="{{ url_for('admin_guests') }}" role="search">
+  <input type="search" name="q" value="{{ q }}" placeholder="Search by name, phone or email" aria-label="Search guests">
+  <input type="date" name="from" value="{{ frm }}" aria-label="Downloads from date" class="narrow">
+  <input type="date" name="to" value="{{ to }}" aria-label="Downloads to date" class="narrow">
+  <select name="only" aria-label="Show"><option value="">All guests</option><option value="downloaded" {{ 'selected' if only == 'downloaded' }}>Only who downloaded</option></select>
+  <button type="submit" class="dark">Show</button>
+  {% if q or frm or to or only %}<a class="btn ghost" href="{{ url_for('admin_guests') }}">Clear</a>{% endif %}
+  <a class="btn ghost" href="{{ url_for('admin_downloads_csv', **{'from': frm, 'to': to}) }}">Excel file{{ " for these dates" if frm or to }}</a>
+</form>
+{% if frm or to %}<p class="note">{{ frm or "the start" }} to {{ to or "today" }}: {{ "{:,}".format(totals.ranged) }} photos downloaded by {{ "{:,}".format(totals.takers) }} guests.</p>{% endif %}
+
+{% if top %}<details class="card" open><summary>Albums with the most downloads{{ " in these dates" if frm or to }}</summary>
+<div class="scroll"><table><tr><th>Album</th><th>Photos downloaded</th><th>Guests</th><th>Last download</th></tr>
+{% for t in top %}<tr><td>{{ t.name }}</td><td>{{ "{:,}".format(t.n) }}</td><td>{{ "{:,}".format(t.people) }}</td><td>{{ fmt(t.last) }}</td></tr>{% endfor %}
+</table></div></details>{% endif %}
+
+<p class="hint">{{ "{:,}".format(total) }} guest{{ '' if total == 1 else 's' }}{% if q %} matching "{{ q }}"{% endif %}. Open a guest to see every photo they took.</p>
+<div class="card">{% if people %}<div class="scroll"><table>
+<tr><th>Name</th><th>Phone</th><th>Email</th><th>Photos downloaded</th><th>Saved</th><th>Last sign-in</th><th>Last download</th></tr>
+{% for u in people %}<tr><td><a href="{{ url_for('admin_guest', email=u.email) }}">{{ u.name or "(no name)" }}</a></td><td>{{ u.phone }}</td><td>{{ u.email }}</td>
+<td>{{ "{:,}".format(u.n) }}</td><td>{{ u.saved }}</td><td>{{ fmt(u.last_login) }}</td><td>{{ fmt(u.last_dl) }}</td></tr>{% endfor %}
+</table></div>{% else %}<p>{{ "No guest matches this search." if q or frm or to or only else "No guest has signed in yet." }}</p>{% endif %}</div>
+{% if pages > 1 %}<nav class="pager" aria-label="Pages">
+{% if page_no > 1 %}<a class="btn ghost small" href="{{ url_for('admin_guests', q=q, only=only, page=page_no-1, **{'from': frm, 'to': to}) }}">Previous</a>{% endif %}
+<span>Page {{ page_no }} of {{ "{:,}".format(pages) }}</span>
+{% if page_no < pages %}<a class="btn ghost small" href="{{ url_for('admin_guests', q=q, only=only, page=page_no+1, **{'from': frm, 'to': to}) }}">Next</a>{% endif %}
+</nav>{% endif %}
+</div>
+{% endblock %}

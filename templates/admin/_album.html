@@ -1,0 +1,52 @@
+{% set live = e.live %}
+<article class="album-card{{ ' is-new' if e.fresh }}" data-eid="{{ e.id }}" data-state="{{ e.state }}" data-name="{{ e.name }}">
+  <div class="album-top">
+    <div class="sp">
+      <h3>{{ e.name }}</h3>
+      <div class="meta">
+        <span><svg class="ic s"><use href="#i-calendar"/></svg> {{ e.event_date or "No date" }}</span>
+        <span><b data-k="photos">{{ "{:,}".format(e.photos) }}</b> photos</span>
+        <span><b data-k="faces">{{ "{:,}".format(e.faces) }}</b> faces</span>
+        {% if e.n_errors %}<span>{{ e.n_errors }} not scanned</span>{% endif %}
+      </div>
+    </div>
+    <span class="pill {{ e.state }}" data-k="pill"><i class="dot"></i><span data-k="pilltext">{{ {'running':'Scanning','ready':'Ready','failed':'Failed','empty':'Not scanned'}[e.state] }}</span></span>
+    <span class="pill {{ 'on' if e.active else 'off' }}">{{ "Link open" if e.active else "Link closed" }}</span>
+  </div>
+  <div class="progress" data-k="bar" {% if not live.running %}hidden{% endif %}><i data-pct="{{ live.pct or 0 }}"></i></div>
+  <p class="status {{ e.state }}" data-eid="{{ e.id }}" data-state="{{ e.state }}">{{ e.status }}</p>
+  {% set keep %}<input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="q" value="{{ q }}"><input type="hidden" name="page" value="{{ page_no }}">{% endset %}
+  <div class="album-actions">
+    <button type="button" class="small" data-copy="{{ e.link }}"><svg class="ic"><use href="#i-link"/></svg> Copy link</button>
+    <a class="btn ghost small" href="{{ e.link }}" target="_blank" rel="noopener"><svg class="ic"><use href="#i-external"/></svg> Open</a>
+    <button type="button" class="ghost small" data-test="{{ e.id }}" data-name="{{ e.name }}"><svg class="ic"><use href="#i-camera"/></svg> Test with selfie</button>
+    <details class="menu"><summary class="btn ghost small icon-btn" aria-label="More actions for {{ e.name }}"><svg class="ic"><use href="#i-dots"/></svg></summary>
+      <div class="menu-pop">
+        <form method="post" action="{{ url_for('admin_event_action', eid=e.id, action='index') }}">{{ keep }}<button><svg class="ic"><use href="#i-refresh"/></svg> Scan new photos</button></form>
+        <form method="post" action="{{ url_for('admin_event_action', eid=e.id, action='rescan') }}" data-confirm="Scan every photo again?" data-text="Every photo of this album is read again. It takes as long as the first scan. Guests can keep using the album meanwhile.">{{ keep }}<button><svg class="ic"><use href="#i-refresh"/></svg> Scan every photo again</button></form>
+        <form method="post" action="{{ url_for('admin_event_action', eid=e.id, action='toggle') }}">{{ keep }}<button><svg class="ic"><use href="#i-lock"/></svg> {{ "Close the guest link" if e.active else "Open the guest link" }}</button></form>
+        <form method="post" action="{{ url_for('admin_event_action', eid=e.id, action='approval') }}">{{ keep }}<button><svg class="ic"><use href="#i-eye"/></svg> Ask me before giving photos: {{ "ON" if e.require_approval else "OFF" }}</button></form>
+        <hr>
+        <form method="post" action="{{ url_for('admin_event_action', eid=e.id, action='delete') }}" data-confirm="Delete the album &quot;{{ e.name }}&quot;?" data-text="Removes the album, its photo list and saved faces from this app. Your original photos on the drives and Google Drive are not touched. The download report is kept." data-yes="Delete album">{{ keep }}<button class="bad"><svg class="ic"><use href="#i-trash"/></svg> Delete this album</button></form>
+      </div>
+    </details>
+  </div>
+  <details class="more"><summary>Folders, date and details</summary>
+    <div class="folders">{% for f, up in e.folder_list %}<div class="folder{{ '' if up else ' miss' }}"><svg class="ic s"><use href="#i-folder"/></svg><code>{{ f }}</code>{% if not up %} <b>not reachable</b>{% endif %}</div>{% endfor %}</div>
+    <div class="row">
+      <form method="post" action="{{ url_for('admin_event_action', eid=e.id, action='date') }}">{{ keep }}
+        <label for="dt{{ e.id }}">Date of the event{% if not e.event_date %} (no date: not in the general link){% endif %}</label>
+        <div class="linkrow"><input id="dt{{ e.id }}" name="event_date" type="date" value="{{ e.event_date }}"><button class="small">Save</button></div></form>
+      <form method="post" action="{{ url_for('admin_event_action', eid=e.id, action='folders') }}">{{ keep }}
+        <label for="fl{{ e.id }}">Folders or Drive links, one per line</label>
+        <textarea id="fl{{ e.id }}" name="folders" rows="2">{{ e.folders }}</textarea><button class="small mt8">Save and scan</button></form>
+    </div>
+    <label for="link{{ e.id }}">Link for this album only</label>
+    <div class="linkrow"><input id="link{{ e.id }}" type="text" readonly value="{{ e.link }}"></div>
+    {% if e.n_errors %}<h3 class="mt16">Files that were not scanned ({{ e.n_errors }})</h3>
+    <p class="hint">These files could not be opened. Everything else in the album was scanned.</p>
+    <div class="scroll"><table><tr><th>File</th><th>Reason</th></tr>
+    {% for x in e.errors %}<tr><td>{{ x.relpath }}</td><td>{{ x.reason }}</td></tr>{% endfor %}</table></div>
+    {% if e.n_errors > e.errors|length %}<p class="hint">Showing the first {{ e.errors|length }}.</p>{% endif %}{% endif %}
+  </details>
+</article>
