@@ -181,10 +181,19 @@ def allowed(s, photo_id):
             (s["id"], photo_id)).fetchone()
         if row:
             return row
+    if not s["email"]:
+        return None
     return c.execute(
         "SELECT p.*, e.folders FROM bookmarks b JOIN photos p ON p.id=b.photo_id "
         "JOIN events e ON e.id=p.event_id WHERE b.email=? AND b.photo_id=? AND e.active=1",
         (s["email"], photo_id)).fetchone()
+
+
+def signin_needed():
+    """Guests who are only looking (no verified email) can see previews;
+    downloading and saving need the email code."""
+    return jsonify(ok=False, signin=True,
+                   error="Sign in with your email to download or save photos."), 403
 
 
 def record_download(c, s, row):
@@ -280,6 +289,11 @@ def make_preview(src, dest, ext=""):
         for x in range(-tw, im.width, tw):
             d.text((x + (row % 2) * tw // 2, y), text, font=font, fill=(255, 255, 255, 80))
     out = Image.alpha_composite(im.convert("RGBA"), layer).convert("RGB")
+    if brand.LOGO.exists():                 # the studio logo, top right, as on downloads
+        try:
+            brand.add_logo(out)
+        except Exception:
+            pass
     tmp = dest.with_suffix(f".{secrets.token_hex(4)}.tmp")
     out.save(tmp, "JPEG", quality=72)
     os.replace(tmp, dest)
@@ -348,6 +362,7 @@ def promos(where):
 
 def guest_page(status=200, **kw):
     return render_template("guest.html", promos_before=promos("before"),
+                           look_first=brand.get(con(), "look_first") == "1",
                            promos_after=promos("after"), **kw), status
 
 
@@ -418,6 +433,53 @@ def otp_send():
     return jsonify(ok=True, ttl=config.OTP_TTL)
 
 
+@app.post("/api/look")
+def look():
+    """Start looking without signing in: the guest can take a selfie and see
+    watermarked previews. Nothing can be downloaded or saved until the email
+    is verified with a code."""
+    d = request.get_json(silent=True) or {}
+    ev = event_for(d.get("code"))
+    c, now = con(), time.time()
+    if not ev or brand.get(c, "look_first") != "1":
+        return err("Please sign in with your email.", 404)
+    if d.get("consent") is not True:
+        return err("Please accept the face-matching consent to continue.")
+    recent = c.execute("SELECT COUNT(*) FROM sessions WHERE email='' AND ip=? AND created_at>?",
+                       (ip(), now - 3600)).fetchone()[0]
+    if recent >= 30:
+        return err("Too many tries from this network. Please sign in with your email.", 429)
+    token = secrets.token_urlsafe(32)
+    c.execute("INSERT INTO sessions(token_hash,email,event_id,created_at,expires_at,ip) "
+              "VALUES(?,?,?,?,?,?)", (h(token), "", ev["id"], now, now + config.SESSION_TTL, ip()))
+    db.audit(c, "looking", None, ev["id"] or None, "without sign-in", ip())
+    c.commit()
+    r = jsonify(ok=True)
+    r.set_cookie(COOKIE, token, max_age=config.SESSION_TTL, httponly=True,
+                 secure=config.COOKIE_SECURE, samesite="Strict")
+    return r
+
+
+@app.post("/api/not-me/<int:pid>")
+def not_me(pid):
+    """The guest says a photo does not show them: it leaves their results,
+    and its score is kept so the owner can see how strict matching must be."""
+    s = guest()
+    if not s:
+        return err("Session expired.", 401)
+    c = con()
+    row = c.execute(
+        "SELECT m.score, p.relpath, p.event_id FROM matches m JOIN photos p ON p.id=m.photo_id "
+        "WHERE m.session_id=? AND m.photo_id=?", (s["id"], pid)).fetchone()
+    if not row:
+        abort(404)
+    c.execute("DELETE FROM matches WHERE session_id=? AND photo_id=?", (s["id"], pid))
+    c.execute("DELETE FROM bookmarks WHERE email=? AND photo_id=? AND email<>''", (s["email"], pid))
+    db.audit(c, "not_me", s["email"] or None, row["event_id"], f"{row['score']:.2f} | {row['relpath']}", ip())
+    c.commit()
+    return jsonify(ok=True)
+
+
 @app.post("/api/otp/verify")
 def otp_verify():
     d = request.get_json(silent=True) or {}
@@ -441,18 +503,26 @@ def otp_verify():
         c.commit()
         return err("That code is not correct.")
     c.execute("UPDATE otps SET used=1 WHERE id=?", (row["id"],))
-    token = secrets.token_urlsafe(32)
-    c.execute("INSERT INTO sessions(token_hash,email,event_id,created_at,expires_at,ip) "
-              "VALUES(?,?,?,?,?,?)",
-              (h(token), email, ev["id"], now, now + config.SESSION_TTL, ip()))
+    looking = guest()
+    token = None
+    if looking and looking["email"] == "" and looking["event_id"] == ev["id"]:
+        # the guest was looking at previews: keep their photos, add the verified email
+        c.execute("UPDATE sessions SET email=?, expires_at=? WHERE id=?",
+                  (email, now + config.SESSION_TTL, looking["id"]))
+    else:
+        token = secrets.token_urlsafe(32)
+        c.execute("INSERT INTO sessions(token_hash,email,event_id,created_at,expires_at,ip) "
+                  "VALUES(?,?,?,?,?,?)",
+                  (h(token), email, ev["id"], now, now + config.SESSION_TTL, ip()))
     c.execute("INSERT INTO users(email,name,phone,created_at,last_login) VALUES(?,?,?,?,?) "
               "ON CONFLICT(email) DO UPDATE SET name=excluded.name, phone=excluded.phone, "
               "last_login=excluded.last_login", (email, row["name"], row["phone"], now, now))
     db.audit(c, "verified", email, ev["id"], f"{row['name']} | {row['phone']}", ip())
     c.commit()
     r = jsonify(ok=True)
-    r.set_cookie(COOKIE, token, max_age=config.SESSION_TTL, httponly=True,
-                 secure=config.COOKIE_SECURE, samesite="Strict")
+    if token:
+        r.set_cookie(COOKIE, token, max_age=config.SESSION_TTL, httponly=True,
+                     secure=config.COOKIE_SECURE, samesite="Strict")
     return r
 
 
@@ -478,7 +548,7 @@ def _state(s):
         "JOIN events e ON e.id=p.event_id WHERE b.email=? AND e.active=1", (s["email"],))]
     u = c.execute("SELECT name FROM users WHERE email=?", (s["email"],)).fetchone()
     return dict(ok=True, email=s["email"], status=s["status"], photos=photos, groups=groups,
-                saved=saved, name=u["name"] if u else "",
+                saved=saved, name=u["name"] if u else "", looking=s["email"] == "",
                 event_code=ev["code"] if ev else ("" if s["event_id"] == 0 else None),
                 date_from=s["date_from"], date_to=s["date_to"],
                 tries_left=max(0, config.SELFIE_MAX_TRIES - s["selfie_tries"]))
@@ -514,6 +584,8 @@ def bookmark(pid):
     s = guest()
     if not s:
         return err("Session expired. Please sign in again.", 401)
+    if not s["email"]:
+        return signin_needed()
     c = con()
     on = (request.get_json(silent=True) or {}).get("on") is True
     if on:
@@ -617,7 +689,7 @@ def selfie():
                   [(s["id"], pid, sc) for pid, sc in found])
     c.execute("UPDATE sessions SET status=?, date_from=?, date_to=? WHERE id=?",
               (status, date_from, date_to, s["id"]))
-    db.audit(c, "selfie_matched", s["email"], log_event,
+    db.audit(c, "selfie_matched", s["email"] or None, log_event,
              f"{len(found)} photos | best score {best:.2f} (needs {config.MATCH_THRESHOLD:.2f}) "
              f"| album has {n_faces} faces"
              + (f" | {len(albums)} albums, {date_from} to {date_to}" if not log_event else ""), ip())
@@ -717,6 +789,8 @@ def download_link(what):
     s = guest()
     if not s:
         return err("Session expired. Please verify again.", 401)
+    if not s["email"]:
+        return signin_needed()
     if what == "selected":                  # the photos the guest ticked
         ids = (request.get_json(silent=True) or {}).get("ids")
         if not isinstance(ids, list) or not ids or len(ids) > 2000 \
@@ -744,7 +818,7 @@ def download(token):
     except BadSignature:
         abort(403)
     # The link works only in the browser that passed the email OTP.
-    if not s or s["id"] != data.get("s"):
+    if not s or s["id"] != data.get("s") or not s["email"]:
         abort(403)
     c = con()
     if data["p"] == "selected":
@@ -1073,6 +1147,17 @@ def admin_brand_save():
         notes.append("Upload a logo first - without one, downloads are sent unchanged.")
     db.audit(c, "branding_changed", detail=who(), ip=ip())
     c.commit()
+    if brand.version() != config.PREVIEW_TAG:       # logo changed: previews are made again
+        config.PREVIEW_TAG = brand.version()
+
+        def clear():
+            for f in config.CACHE_DIR.glob("*.jpg"):
+                try:
+                    f.unlink()
+                except OSError:
+                    pass
+        import threading
+        threading.Thread(target=clear, daemon=True).start()
     return redirect(url_for("admin_brand", msg=" ".join(notes) or "Saved. Guests see the new look now."))
 
 
@@ -1177,7 +1262,13 @@ def admin_settings_page():
     if not is_owner():
         return redirect(url_for("admin"))
     c = con()
-    return admin_page("settings", threshold=f"{config.MATCH_THRESHOLD:.2f}",
+    wrong = [float(r[0].split(" | ")[0]) for r in c.execute(
+        "SELECT detail FROM audit WHERE action='not_me' ORDER BY id DESC LIMIT 500")
+        if r[0][:4].replace(".", "").isdigit()]
+    reported = dict(n=len(wrong), low=min(wrong), high=max(wrong),
+                    suggest=min(0.80, max(wrong) + 0.01)) if wrong else None
+    return admin_page("settings", reported=reported, look_first=brand.get(c, "look_first") == "1",
+                      threshold=f"{config.MATCH_THRESHOLD:.2f}",
                       scan_side=config.SCAN_SIDE, drive_email=gdrive.robot_email(),
                       log=c.execute("SELECT * FROM audit ORDER BY id DESC LIMIT 200").fetchall())
 
@@ -1293,6 +1384,10 @@ def admin_settings():
         abort(403)
     back = lambda m: redirect(url_for("admin_settings_page", msg=m))     # noqa: E731
     c = con()
+    if request.form.get("what") == "look_first":
+        brand.put(c, "look_first", "1" if request.form.get("look_first") else "0")
+        c.commit()
+        return back("Saved.")
     side = request.form.get("scan_side", "")
     if side:
         if side not in ("1280", "1600", "2000"):
@@ -1622,9 +1717,12 @@ def startup_checks():
 def main():
     startup_checks()
     host = config.HOST
-    port = netutil.free_port(host, config.PORT)
+    try:                                    # one fixed port, remembered in data/port.txt
+        port = netutil.sticky_port(host, config.PORT, config.DATA_DIR / "port.txt")
+    except RuntimeError as e:
+        raise SystemExit(f"\n  {e}\n")
     if port != config.PORT:
-        print(f"Port {config.PORT} is busy - using port {port} instead.")
+        print(f"Using port {port} (kept in {config.DATA_DIR / 'port.txt'}).")
     scheme = "https" if config.HTTPS else "http"
     if config.DEV_MODE:
         print("!! DEV_MODE is ON - for testing on your own computer only !!")

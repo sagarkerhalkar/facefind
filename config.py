@@ -95,6 +95,7 @@ DOWNLOAD_LINK_TTL = 120    # seconds
 _thr = os.environ.get("MATCH_THRESHOLD", "").strip()
 MATCH_THRESHOLD = float(_thr) if _thr not in ("", "0.40", "0.363") else 0.45
 MAX_RESULTS = 500
+PREVIEW_TAG = ""            # changes when the logo changes, so previews are made again
 PREVIEW_SIDE = 1400         # watermarked preview, large enough for the full-page view
 # Matching is stricter for tiny faces (their signatures are less reliable), and
 # a photo must also resemble the guest's OTHER matched photos, not only the selfie.

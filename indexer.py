@@ -131,7 +131,7 @@ def preview_path(row):
     when the photo changes, so an old preview can never be shown for it."""
     import hashlib
     tag = hashlib.sha256(f"{row['root']}|{row['relpath']}|{row['mtime']}|{row['stamp']}"
-                         f"|{config.PREVIEW_SIDE}".encode()).hexdigest()[:16]
+                         f"|{config.PREVIEW_SIDE}|{config.PREVIEW_TAG}".encode()).hexdigest()[:16]
     return config.CACHE_DIR / f"{row['id']}-{tag}.jpg"
 
 

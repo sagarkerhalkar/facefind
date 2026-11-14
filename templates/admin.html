@@ -38,7 +38,7 @@
 <tr><th>Their selfie</th><th>Email</th><th>Album</th><th>Photos found</th><th></th></tr>
 {% for p in pending %}<tr>
 <td><img class="selfie" src="{{ url_for('admin_selfie', sid=p.id) }}" alt="Selfie sent by {{ p.email }}"></td>
-<td>{{ p.email }}</td><td>{{ p.name }}{% if p.date_from %} ({{ p.date_from }} to {{ p.date_to }}){% endif %}</td><td>{{ p.n }}</td>
+<td>{{ p.email or "(not signed in)" }}</td><td>{{ p.name }}{% if p.date_from %} ({{ p.date_from }} to {{ p.date_to }}){% endif %}</td><td>{{ p.n }}</td>
 <td><form class="inline" method="post" action="{{ url_for('admin_request', sid=p.id, action='approve') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small">Give photos</button></form>
 <form class="inline" method="post" action="{{ url_for('admin_request', sid=p.id, action='reject') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small danger">Refuse</button></form></td>
 </tr>{% endfor %}</table></div></div>
@@ -266,11 +266,18 @@
 <button type="submit">Connect Google Drive</button></form>
 {% endif %}</div>
 
+<form class="card" method="post" action="{{ url_for('admin_settings') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="what" value="look_first">
+<h2>Looking before signing in</h2>
+<label class="check"><input type="checkbox" name="look_first" {{ 'checked' if look_first }}><span>Guests can take a selfie and see their watermarked previews without a code. Downloading and saving still need name, phone and the email code.</span></label>
+<p class="hint">With this on, anyone who has the link can see previews of a person by uploading that person's picture. Turn it off for private events.</p>
+<button type="submit">Save</button></form>
+
 <form class="card" method="post" action="{{ url_for('admin_settings') }}"><input type="hidden" name="csrf" value="{{ csrf }}">
 <h2>Match strictness</h2>
 <label for="threshold">How alike two faces must be (0.30 to 0.80)</label>
 <input id="threshold" name="threshold" type="number" min="0.30" max="0.80" step="0.01" value="{{ threshold }}" required>
 <p class="hint">Higher = fewer photos of other people, but some of the guest's own photos may be missed. To choose: use "Test with my own selfie" on an album; each photo shows its score. If another person's photo shows 0.52, set this to 0.55. No new scan is needed.</p>
+{% if reported %}<p class="note">Guests pressed "This is not me" on {{ reported.n }} photo{{ '' if reported.n == 1 else 's' }}. Their scores were {{ "%.2f"|format(reported.low) }} to {{ "%.2f"|format(reported.high) }}. A strictness of {{ "%.2f"|format(reported.suggest) }} would have left all of them out.</p>{% endif %}
 <button type="submit">Save strictness</button></form>
 
 <form class="card" method="post" action="{{ url_for('admin_settings') }}"><input type="hidden" name="csrf" value="{{ csrf }}">
@@ -290,5 +297,5 @@
 </table></div></details>
 {% endif %}
 </main></div>
-<script src="{{ url_for('static', filename='admin.js') }}?v=5"></script>
+<script src="{{ url_for('static', filename='admin.js') }}?v=6"></script>
 </body></html>

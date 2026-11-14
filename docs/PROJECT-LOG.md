@@ -51,6 +51,8 @@ over many drives:
 
 | 24 | A selfie still shows other people; do not skip photos; click a photo for a full-page view; sign-in, offers and photo pages look childish - wants 3D and a look like the reference sites; download report must cope with lakhs of downloads and users; wants it on the web, not only on the local network | **Matching**: faces are now cut from the full-size photo (sharper signatures for small faces); a tiny face needs a higher score; with four or more matches a photo must also resemble the guest's other matched photos (drops look-alikes). "Scan every photo again" button added - needed once per album to get the sharper signatures. **Full-page viewer** with arrows, swipe, Save, Select, Download. **Guest pages redesigned**: dark gallery wall with the studio picture as backdrop, glass sign-in card that tilts to the pointer, offers in a 3D row, photos in their own shape in columns. **Download report**: totals (today, 7 days, all), busiest albums, date filter, guests in pages, one page per guest, Excel file streamed and filtered by date or guest. **On the web**: `start-web.bat` opens a Cloudflare tunnel and prints a public https address |
 
+| 25 | Photos shuffle on the photo page; a selfie still brings another person; logo must be on previews, top right; guests should be able to look without OTP (preview only); if something goes wrong the guest must be able to go back; sign-in experience still poor; the port changes (8444 / 8787) and must be fixed; after login no company picture; no progress bar, just "12 photos of you" | **Look first**: one button "Find my photos" - consent, events, selfie, previews - with no code; name, phone and email code are asked once, when the guest downloads or saves, and the photos stay on screen (owner can switch this off in Settings). **Back** button on every step, the browser Back button works, errors keep the guest on the same step with a "try again"; name, phone and email are remembered on the device; the code verifies itself when the sixth digit is typed; "Send a new code" after 30 s. **Photo page**: fixed tiles that never move while loading, offers no longer move by themselves, the steps bar is gone, the studio picture is not shown after the first screen. **Logo** on every preview, top right. **"This is not me"** removes a photo and records its score; Settings shows the strictness that would have excluded the reported photos. **One fixed port**, remembered in `data/port.txt`; `start-web.bat` tunnels that same port, so the office address and the web address work together. Also fixed: the full-page viewer was wider than the screen on phones |
+
 ## Files a user runs
 
 | File | Purpose |
@@ -79,6 +81,9 @@ over many drives:
 - `start-web.bat` could not be run on the build machine (no Windows, no
   Cloudflare access). The app behind a proxy was checked with simulated
   tunnel headers: links, secure cookies and visitor address were correct.
+- With "look first" ON, anyone who has the link can see watermarked previews
+  of a person by uploading that person's picture. Downloads still need the
+  email code and are recorded. Switch it off for private events.
 - Face matching is never 100%: look-alikes, small or blurred faces can give a
   wrong photo. Higher strictness means fewer wrong photos and more missed ones.
 - Without approval and without a liveness check, a person can upload someone
