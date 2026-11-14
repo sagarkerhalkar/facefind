@@ -531,6 +531,59 @@ assert "Page 1 of" in adm.get("/admin/guest?email=u1@x.com").get_data(as_text=Tr
 con.execute("DELETE FROM downloads WHERE relpath LIKE 'bulk/%' OR relpath='old/long-ago.jpg'"); con.commit()
 print("ok  full rescan; download report with totals, dates, per-guest page and Excel export")
 
+# looking before signing in: previews yes, downloads and saving only after the email code
+con.execute("DELETE FROM otps"); con.commit(); sent.clear()
+keep7 = code; code = ""; lk = A.app.test_client()
+assert lk.post("/api/look", json={"code": ""}, headers=H).status_code == 400            # consent is still needed
+assert lk.post("/api/look", json={"code": "", "consent": True}).status_code == 403      # only from our page
+assert lk.post("/api/look", json={"code": "", "consent": True}, headers=H).status_code == 200
+stl = lk.get("/api/me").json; assert stl["looking"] is True and stl["email"] == "" and stl["status"] == "verified"
+seen = lk.post("/api/selfie", json={"image": img(RED), "date_from": "2026-11-01", "date_to": "2026-11-30"}, headers=H).json
+assert seen["status"] == "matched" and len(seen["photos"]) == 2 and seen["looking"] is True
+assert lk.get(f"/api/preview/{seen['photos'][0]}").status_code == 200 and lk.get(f"/api/preview/{blue_h}").status_code == 404
+for path, body in ((f"/api/download-link/{seen['photos'][0]}", {}), ("/api/download-link/all", {}),
+                   ("/api/download-link/selected", {"ids": seen["photos"]}), (f"/api/bookmark/{seen['photos'][0]}", {"on": True})):
+    r_ = lk.post(path, json=body, headers=H); assert r_.status_code == 403 and r_.json["signin"] is True, path
+n_dl = con.execute("SELECT COUNT(*) FROM downloads").fetchone()[0]
+login(lk, "look@x.com")                                                               # same browser signs in: the photos stay
+after_ = lk.get("/api/me").json; assert after_["looking"] is False and after_["email"] == "look@x.com" and after_["photos"] == seen["photos"]
+assert lk.get(lk.post(f"/api/download-link/{seen['photos'][0]}", json={}, headers=H).json["url"]).status_code == 200
+assert con.execute("SELECT COUNT(*) FROM downloads WHERE email='look@x.com'").fetchone()[0] == 1 and con.execute("SELECT COUNT(*) FROM downloads").fetchone()[0] == n_dl + 1
+# "This is not me" takes a photo out of the results and tells the owner its score
+assert lk.post(f"/api/not-me/{blue_h}", json={}, headers=H).status_code == 404
+assert lk.post(f"/api/not-me/{seen['photos'][1]}", json={}, headers=H).status_code == 200
+assert lk.get("/api/me").json["photos"] == seen["photos"][:1] and lk.get(f"/api/preview/{seen['photos'][1]}").status_code == 404
+assert 'pressed "This is not me" on 1 photo' in adm.get("/admin/settings").get_data(as_text=True).replace("&#34;", '"')
+# the owner can switch looking-first off
+adm.post("/admin/settings", data={"csrf": csrf, "what": "look_first"})
+assert A.app.test_client().post("/api/look", json={"code": "", "consent": True}, headers=H).status_code == 404
+assert 'data-look=""' in A.app.test_client().get("/").get_data(as_text=True)
+adm.post("/admin/settings", data={"csrf": csrf, "what": "look_first", "look_first": "on"})
+assert 'data-look="1"' in A.app.test_client().get("/").get_data(as_text=True)
+code = keep7
+print("ok  looking without a code shows previews only; signing in keeps the photos; 'not me' is recorded")
+
+# the studio logo is on previews too (top right)
+import brand as B2
+assert B2.LOGO.exists()
+pv_ = lk.get(f"/api/preview/{seen['photos'][0]}"); im_ = Image.open(io.BytesIO(pv_.data)).convert("RGB")
+m_ = int(max(im_.size) * 0.018); px_ = im_.getpixel((im_.width - m_ - 14, m_ + 5))
+assert px_[1] > 150 and px_[0] < 120, px_
+print("ok  previews carry the studio logo")
+
+# the port stays the same from start to start
+import socket as _so
+import netutil
+memo = tmp / "port.txt"; first = netutil.sticky_port("127.0.0.1", 39950, memo)
+assert memo.read_text() == str(first) and netutil.sticky_port("127.0.0.1", 40500, memo) == first
+hold = _so.socket(); hold.bind(("127.0.0.1", first)); hold.listen()
+try:
+    netutil.sticky_port("127.0.0.1", 40500, memo); raise SystemExit("a busy fixed port must not be replaced silently")
+except RuntimeError as e_:
+    assert "already running" in str(e_)
+hold.close()
+print("ok  one fixed port, remembered; a busy port is reported, not replaced")
+
 # LAN / VLAN rules
 import netutil
 config.ALLOWED_NETWORKS = netutil.parse_networks("192.168.10.0/24, 192.168.20.0/24")

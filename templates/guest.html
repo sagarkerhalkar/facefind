@@ -15,7 +15,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0d0b1a">
 <title>{{ event.name if event else ("Find your photos" if portal else "Link not found") }} - {{ brand }}</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=5">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=6">
 <link rel="stylesheet" href="{{ url_for('brand_theme') }}?v={{ studio.v }}">
 </head>
 <body class="guest">
@@ -30,17 +30,26 @@
   {{ flow(promos_before, "flow-before") }}
 </section>
 {% endif %}
-<main class="panel" id="app" data-code="{{ event.code if event else '' }}" data-portal="{{ '1' if portal else '' }}">
+<main class="panel" id="app" data-code="{{ event.code if event else '' }}" data-portal="{{ '1' if portal else '' }}" data-look="{{ '1' if look_first else '' }}">
 {% if not event and not portal %}
   <section class="card"><h1>Link not found</h1>
   <p>This photo link is not valid or the event is closed. Please ask the photographer for a new link.</p></section>
 {% else %}
-  <ol class="steps"><li id="s1">Sign in</li><li id="s2">Code</li><li id="s3">{{ "Events and selfie" if portal else "Selfie" }}</li><li id="s4">Photos</li></ol>
   <p id="msg" class="msg" role="alert" hidden></p>
 
-  <section class="card tilt" id="step-email" hidden>
-    <h2>Sign in to see your photos</h2>
-    <p>We email you a one-time code, so your photos reach only you.{% if portal %} One sign-in covers every event you attended.{% endif %}</p>
+  <section class="card tilt" id="v-home" hidden>
+    <h2>Find your photos</h2>
+    <p>Take one selfie and see every photo you are in. No code needed to look.</p>
+    <label class="check"><input id="consent" type="checkbox">
+      <span>I agree that my selfie is used once to find my face in {{ "the photos of the events I choose" if portal else "this event's photos" }}. The selfie is not kept after matching.</span></label>
+    <button type="button" class="wide" id="look">Find my photos</button>
+    <button type="button" class="link" id="to-signin">I have saved photos - sign in</button>
+  </section>
+
+  <section class="card tilt" id="v-signin" hidden>
+    <button type="button" class="back" data-back>Back</button>
+    <h2>Sign in</h2>
+    <p id="si-why">We email you a one-time code, so your photos reach only you.</p>
     <form id="f-email">
       <label for="gname">Your name</label>
       <input id="gname" type="text" autocomplete="name" required minlength="2" maxlength="80">
@@ -48,24 +57,26 @@
       <input id="phone" type="tel" autocomplete="tel" inputmode="tel" required pattern="[+0-9 ()\-]{7,20}" placeholder="98765 43210">
       <label for="email">Email address</label>
       <input id="email" type="email" autocomplete="email" required placeholder="you@example.com">
-      <label class="check"><input id="consent" type="checkbox" required>
-        <span>I agree that my selfie is used once to find my face in {{ "the photos of the events I choose" if portal else "this event's photos" }}. The selfie is not kept after matching.</span></label>
+      <label class="check"><input id="consent2" type="checkbox" required>
+        <span>I agree that my selfie is used once to find my face. The selfie is not kept after matching.</span></label>
       <button type="submit" class="wide">Email me the code</button>
     </form>
   </section>
 
-  <section class="card tilt" id="step-otp" hidden>
+  <section class="card tilt" id="v-otp" hidden>
+    <button type="button" class="back" data-back>Back</button>
     <h2>Enter the code</h2>
     <p>We sent a 6-digit code to <b id="otp-email"></b>. It is valid for 5 minutes. Check the spam folder too.</p>
     <form id="f-otp">
       <label for="otp">6-digit code</label>
-      <input id="otp" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required>
+      <input id="otp" class="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required>
       <button type="submit" class="wide">Verify and continue</button>
-      <button type="button" class="link" id="otp-back">Use a different email</button>
+      <button type="button" class="link" id="resend">Send a new code</button>
     </form>
   </section>
 
-  <section class="card" id="step-events" hidden>
+  <section class="card" id="v-events" hidden>
+    <button type="button" class="back" data-back>Back</button>
     <h2 id="ev-hello">Choose your events</h2>
     <p>Pick the dates, then tick the events you attended.</p>
     <div class="row dates">
@@ -82,22 +93,23 @@
     <button type="button" class="link" id="ev-saved" hidden>My saved photos</button>
   </section>
 
-  <section class="card" id="step-selfie" hidden>
+  <section class="card" id="v-selfie" hidden>
+    <button type="button" class="back" data-back>Back</button>
     <h2>Take a selfie</h2>
     <p>Look straight at the camera, alone, in good light. Avoid glare on glasses.</p>
-    <div class="cam"><video id="video" autoplay playsinline muted></video></div>
+    <div class="cam" id="cam"><video id="video" autoplay playsinline muted></video></div>
     <canvas id="canvas" hidden></canvas>
     <button id="snap" type="button" class="wide">Take selfie and find my photos</button>
     <label for="upload">Or upload a clear photo of your face</label>
     <input id="upload" type="file" accept="image/*">
   </section>
 
-  <section class="card" id="step-pending" hidden>
+  <section class="card" id="v-pending" hidden>
     <h2>Waiting for approval</h2>
     <p>The photographer reviews each request before photos are shown. Keep this page open; it updates by itself.</p>
   </section>
 
-  <section id="step-gallery" hidden>
+  <section id="v-gallery" hidden>
     <div class="bar">
       <h1 id="g-title">Your photos</h1>
       <div class="tools"><button id="dl-all" type="button">Download all</button>
@@ -106,7 +118,8 @@
       <button id="retry" type="button" class="ghost">New search</button>
       <button id="forget" type="button" class="ghost">Sign out</button></div>
     </div>
-    <p class="hint" id="g-hint">Open a photo to see it full page. Tick photos to download only those. Save keeps a photo for your next visit.</p>
+    <p class="note" id="g-signin" hidden>You are looking at previews. <button type="button" class="link" id="g-signin-btn">Sign in with your email</button> to download or save photos.</p>
+    <p class="hint" id="g-hint">Open a photo to see it full page, save it or download it. Tick photos to download several at once.</p>
     <p id="g-empty" class="card" hidden></p>
     <div id="grid" class="grid"></div>
     <div class="tray" id="tray" hidden><span id="tray-count"></span>
@@ -116,10 +129,10 @@
 
   {% if promos_before %}<section class="phone-flow">{{ flow(promos_before, "flow-phone") }}</section>{% endif %}
   <section id="after" hidden>{% if promos_after %}<h2 class="after-title">From {{ brand }}</h2>{{ flow(promos_after, "flow-after") }}{% endif %}</section>
-  <p class="foot">Photos are shown only to the verified email address. Every download is recorded.</p>
+  <p class="foot">Previews carry a watermark. Downloads go only to a verified email address and are recorded.</p>
 {% endif %}
 </main>
 </div>
-<script src="{{ url_for('static', filename='app.js') }}?v=5"></script>
+<script src="{{ url_for('static', filename='app.js') }}?v=6"></script>
 </body>
 </html>

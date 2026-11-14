@@ -66,8 +66,14 @@ how alike two faces must be; use "Test with my own selfie" to see the scores.
 
 ## On the web
 
+The app keeps one port: the first start chooses it (8443, or the next free
+one) and writes it to `data/port.txt`; every later start uses the same
+port. If that port is taken, the app says so and stops - usually FaceFind
+is already running in another window.
+
 Double-click `start-web.bat`. It downloads Cloudflare's tunnel program,
 starts the app and prints a public address ending in `trycloudflare.com`.
+The office-network address keeps working at the same time.
 Guests open that address; the admin is that address plus `/admin`. No router
 changes are needed and HTTPS is included. Keep the window open; the PC must
 stay on, and the address changes at every start.
@@ -79,10 +85,10 @@ last line instead of `start-web.bat`:
     cloudflared.exe tunnel login
     cloudflared.exe tunnel create facefind
     cloudflared.exe tunnel route dns facefind photos.yourdomain.com
-    cloudflared.exe tunnel run --url http://127.0.0.1:8787 facefind
+    cloudflared.exe tunnel run --url https://127.0.0.1:PORT --no-tls-verify facefind
 
-and start the app with `HTTPS=0`, `TRUST_PROXY=1`, `HOST=127.0.0.1`,
-`PORT=8787` and `PUBLIC_URL=https://photos.yourdomain.com` in `.env`.
+(PORT is the number in `data/port.txt`) and put `TRUST_PROXY=1` and
+`PUBLIC_URL=https://photos.yourdomain.com` in `.env`.
 Once it is on the web, use a long admin password.
 
 ## Photos from many drives

@@ -21,6 +21,7 @@ DEFAULTS = {
     "accent": "#E8A317",          # marigold
     "stamp": "0",                 # 1 = put the logo on downloaded photos
     "scan_side": str(config.SCAN_SIDE),
+    "look_first": "1",            # 1 = guests may see previews before signing in
 }
 COLOUR_RE = re.compile(r"#[0-9a-fA-F]{6}")
 STAMPABLE = {".jpg", ".jpeg", ".jpe", ".jfif", ".png", ".webp", ".bmp", ".tif", ".tiff"}
@@ -41,6 +42,7 @@ def load():
         config.BRAND = get(c, "brand")
         config.SCAN_SIDE = int(get(c, "scan_side"))
         config.DRIVE_SCAN_SIDE = max(1600, config.SCAN_SIDE)
+        config.PREVIEW_TAG = version()
         v = db.kv_get(c, "match_threshold")
         if v:
             config.MATCH_THRESHOLD = float(v)
@@ -75,6 +77,16 @@ def version():
     return str(int(max([f.stat().st_mtime for f in (LOGO, BACKGROUND) if f.exists()] or [0])))
 
 
+def add_logo(im):
+    """Puts the studio logo, small, in the top right corner of a picture."""
+    logo = Image.open(LOGO).convert("RGBA")
+    width = max(48, int(max(im.size) * 0.09))
+    logo = logo.resize((width, max(1, round(logo.height * width / logo.width))), Image.LANCZOS)
+    margin = max(8, int(max(im.size) * 0.018))
+    im.paste(logo, (im.width - logo.width - margin, margin), logo)
+    return im
+
+
 def stamp(data, ext):
     """A downloaded photo with the studio logo, small, in the top right
     corner. Returns JPEG bytes, or None when this file type cannot be
@@ -87,11 +99,7 @@ def stamp(data, ext):
         im = ImageOps.exif_transpose(im)
         exif = im.getexif()
         im = im.convert("RGB")
-        logo = Image.open(LOGO).convert("RGBA")
-        width = max(48, int(max(im.size) * 0.09))
-        logo = logo.resize((width, max(1, round(logo.height * width / logo.width))), Image.LANCZOS)
-        margin = max(8, int(max(im.size) * 0.018))
-        im.paste(logo, (im.width - logo.width - margin, margin), logo)
+        add_logo(im)
         out = io.BytesIO()
         im.save(out, "JPEG", quality=95, subsampling=0, exif=exif.tobytes(),
                 **({"icc_profile": icc} if icc else {}))

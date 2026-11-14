@@ -47,6 +47,33 @@ def free_port(host, start, tries=50):
     raise RuntimeError(f"No free port between {start} and {start + tries - 1}")
 
 
+def sticky_port(host, wanted, memo):
+    """The app keeps ONE port. The first start takes `wanted` (or the next
+    free one) and writes it to the file `memo`; every later start uses that
+    same port, so the address never changes. If the port is taken then,
+    the app says so instead of quietly moving to another one."""
+    saved = None
+    try:
+        saved = int(memo.read_text().strip())
+    except (OSError, ValueError):
+        pass
+    if saved:
+        try:
+            return free_port(host, saved, tries=1)
+        except RuntimeError:
+            raise RuntimeError(
+                f"Port {saved} is in use. FaceFind is probably already running in another "
+                f"window - close that window and start again. (To let the app choose a new "
+                f"port, delete the file {memo}.)")
+    else:
+        port = free_port(host, wanted)
+        try:
+            memo.write_text(str(port))
+        except OSError:
+            pass
+        return port
+
+
 def parse_networks(text):
     """'192.168.10.0/24, 192.168.20.0/24' -> list of networks. Empty = all."""
     nets = []
