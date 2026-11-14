@@ -453,7 +453,7 @@ def promos(where):
     rows = con().execute(
         f"SELECT * FROM promos WHERE active=1 AND show_{where}=1 "
         "AND (kind<>'event' OR event_date='' OR event_date>=?) "
-        "ORDER BY kind DESC, CASE WHEN event_date='' THEN '9999' ELSE event_date END, id DESC "
+        "ORDER BY CASE kind WHEN 'event' THEN 0 WHEN 'past' THEN 1 ELSE 2 END, CASE WHEN event_date='' THEN '9999' ELSE event_date END, id DESC "
         "LIMIT 12", (time.strftime("%Y-%m-%d"),)).fetchall()
     return [dict(r, image=brand.promo_image(r["id"]).exists()) for r in rows]
 
@@ -1360,7 +1360,7 @@ def admin_promo_create():
     pid = c.execute(
         "INSERT INTO promos(kind,title,body,link,event_date,show_before,show_after,created_at) "
         "VALUES(?,?,?,?,?,?,?,?)",
-        ("event" if f.get("kind") == "event" else "ad", title, f.get("body", "").strip()[:400],
+        (f.get("kind") if f.get("kind") in ("event", "past") else "ad", title, f.get("body", "").strip()[:400],
          link, date if DATE_RE.fullmatch(date) else "", 1 if f.get("show_before") else 0,
          1 if f.get("show_after") else 0, time.time())).lastrowid
     c.commit()
