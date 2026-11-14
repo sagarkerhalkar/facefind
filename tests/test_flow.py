@@ -579,8 +579,9 @@ assert small_.status_code == 200 and max(Image.open(io.BytesIO(small_.data)).siz
 assert small_.headers["Cache-Control"] == "private, max-age=3600" and "X-Keep" not in small_.headers
 assert lk.get("/api/me").headers["Cache-Control"] == "no-store" and A.app.test_client().get(f"/api/preview/{pid0}?s=t").status_code == 404
 (pa / "r.png").rename(pa / "r.away")                       # original gone (drive off): the tile still loads from the kept copy
-for f in config.CACHE_DIR.glob(f"{pid0}-*-s.jpg"): f.unlink()
-assert lk.get(f"/api/preview/{pid0}?s=t").status_code == 200
+tag_ = config.PREVIEW_TAG; config.PREVIEW_TAG = "fresh"                # forces the tile to be made again
+assert lk.get(f"/api/preview/{pid0}?s=t").status_code == 200 and lk.get(f"/api/preview/{pid0}").status_code == 404
+config.PREVIEW_TAG = tag_
 (pa / "r.away").rename(pa / "r.png")
 print("ok  small tiles come from the copy kept by the scan; previews may be kept by the browser")
 
