@@ -1838,6 +1838,25 @@ def startup_checks():
         c.close()
 
 
+def _address_check(scheme, port):
+    """A few seconds after start: does the app answer on 127.0.0.1 and on
+    localhost? Prints the answer in the window (the web tunnel uses one of them)."""
+    def run():
+        import ssl
+        import urllib.request
+        time.sleep(6)
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        for name in ("127.0.0.1", "localhost"):
+            try:
+                r = urllib.request.urlopen(f"{scheme}://{name}:{port}/", timeout=8, context=ctx)
+                print(f"Address check: {scheme}://{name}:{port}  OK ({r.status})", flush=True)
+            except Exception as e:
+                print(f"Address check: {scheme}://{name}:{port}  FAILED - {e}", flush=True)
+    threading.Thread(target=run, daemon=True).start()
+
+
 def main():
     startup_checks()
     host = config.HOST
@@ -1858,11 +1877,13 @@ def main():
     if config.HTTPS:
         cert, key = netutil.ensure_cert(config.TLS_DIR, config.TLS_NAMES)
         netutil.offer_trust(cert)
-        _open_browser(f"https://localhost:{port}/admin")
+        _open_browser(f"https://127.0.0.1:{port}/admin")
+        _address_check(scheme, port)
         from werkzeug.serving import run_simple
         run_simple(host, port, app, threaded=True, ssl_context=(str(cert), str(key)))
     else:
-        _open_browser(f"http://localhost:{port}/admin")
+        _open_browser(f"http://127.0.0.1:{port}/admin")
+        _address_check(scheme, port)
         try:
             from waitress import serve
             serve(app, host=host, port=port, threads=32)

@@ -60,6 +60,7 @@ over many drives:
 | 27 | Start-up crash "database disk image is malformed" and the website showing "Internal Server Error" (14 Nov 11:09) | `db.repair()`: a damaged `data/facefind.db` is copied to `data/broken-db/<time>/`, a new one is built and every readable record is copied across; the app starts. Also a friendly error page with a reference, and the real reason in `data/error.log`. Tested. |
 | 28 | "I should be able to delete the old event also" (14 Nov 11:11) | "Delete this album" on every album: removes photo list, faces, saved photos and small copies; originals untouched; download report kept; refused while a scan runs. Test added. |
 | 29 | Database "malformed" again while running; old albums lost; slow with 10-15 guests (14 Nov 11:39) | Safe journal mode by default (`DB_WAL=1` to opt in), backups every 20 min in `data/backups`, repair starts from the newest backup, restart on runtime damage (`start.bat`/`start.sh` loop, exit code 3), scan yields to guests and runs below normal priority, 32 web threads, `.env.example` note to keep `DATA_DIR` on a local disk. Tests: backup restore. |
+| 30 | "You changed 127.0.0.1 to localhost, cloudflare web not working, still slow, database error" (14 Nov 11:49) | Browser opens `127.0.0.1`; start-up "Address check" prints whether `127.0.0.1` and `localhost` both answer. Tunnel unchanged. |
 
 ## Files a user runs
 

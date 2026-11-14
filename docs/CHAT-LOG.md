@@ -241,6 +241,14 @@ search, and browsers may keep previews for an hour.
 
 ---
 
+## 14 November, 11:49
+
+**You:** "again you change from 127.0.0.1 to local host so clfoud web not jworking and same misktak app is to slo data base error what the hell i want 127 , local host all kworking"
+
+**Reply (short):** Nothing about the tunnel or the address was changed in the last two updates (the tunnel still uses `https://127.0.0.1:<port>`); only the line that opens the browser said `localhost`. It now opens `127.0.0.1`, and the app prints an "Address check" a few seconds after start for both `127.0.0.1` and `localhost`. Asked for the first lines of the window, where `D:` is, and the `broken-db` file, because the cause of the damaged database can only be seen on the owner's PC.
+
+---
+
 ## Still open
 
 - Wrong person in selfie results. Waiting for two answers from the owner:
