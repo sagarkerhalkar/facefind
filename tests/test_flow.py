@@ -613,4 +613,37 @@ assert cert.exists() and netutil.ensure_cert(tmp / "tls", ["photos.lan"])[0].sta
 import socket; busy = socket.socket(); busy.bind(("127.0.0.1", 0)); bp = busy.getsockname()[1]
 assert netutil.free_port("127.0.0.1", bp) != bp; busy.close()
 print("ok  VLAN allow-list, admin VLAN, certificate, busy-port fallback")
-print("ok  path escape blocked, sign-out erases, closed link is dead\nALL TESTS PASSED")
+print("ok  path escape blocked, sign-out erases, closed link is dead")
+
+
+# ---- a crash is logged with a reference, and the visitor sees a friendly page
+_A = A
+_orig_home = _A.guest_page
+def _boom(*a, **k):
+    raise RuntimeError("test crash")
+_A.guest_page = _boom
+_c = _A.app.test_client()
+_r = _c.get("/")
+assert _r.status_code == 500 and b"Reference" in _r.data and b"Traceback" not in _r.data
+_j = _c.post("/api/otp/send", json={}, headers={"X-Requested-With": "facefind"})
+assert _j.status_code != 200
+_A.guest_page = _orig_home
+_log = (config.DATA_DIR / "error.log").read_text(encoding="utf-8")
+assert "test crash" in _log and "ref " in _log
+print("ok crash page")
+
+# a damaged database repairs itself instead of stopping the app
+import db
+_con = db.connect(); _con.execute("INSERT OR REPLACE INTO kv(k,v) VALUES('repair-test','kept')"); _con.commit(); _con.close()
+_dbf = config.DB_PATH
+with open(_dbf, "r+b") as _f:                       # wreck the middle of the file
+    _f.seek(0); _f.write(b"\x00garbage" * 800)
+for _x in ("-wal", "-shm"):
+    try: _dbf.with_name(_dbf.name + _x).unlink()
+    except OSError: pass
+db.init()                                           # must not raise
+_con = db.connect(); assert _con.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+_con.execute("SELECT count(*) FROM events"); _con.close()
+assert list((config.DATA_DIR / "broken-db").glob("*/facefind.db"))
+print("ok  damaged database is kept aside, rebuilt, and the app starts")
+print("ALL TESTS PASSED")

@@ -85,6 +85,43 @@ def err(msg, status=400):
     return jsonify(ok=False, error=msg), status
 
 
+import logging
+from logging.handlers import RotatingFileHandler
+
+_elog = logging.getLogger("facefind")
+try:
+    _h = RotatingFileHandler(config.DATA_DIR / "error.log", maxBytes=2_000_000,
+                             backupCount=3, encoding="utf-8")
+    _h.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
+    _elog.addHandler(_h)
+except OSError:
+    pass
+_elog.setLevel(logging.INFO)
+
+
+@app.errorhandler(Exception)
+def _crash(e):
+    """Never show a bare 'Internal Server Error': write the real reason to
+    data/error.log (and the console) and give the visitor a reference."""
+    if isinstance(e, HTTPException):
+        return e
+    import traceback
+    ref = secrets.token_hex(3)
+    _elog.error("ref %s  %s %s\n%s", ref, request.method, request.full_path,
+                traceback.format_exc())
+    if request.path.startswith("/api/"):
+        return jsonify(ok=False, error=f"Something went wrong on our side (ref {ref}). "
+                                       "Please try again."), 500
+    return ("<!doctype html><meta name=viewport content='width=device-width'>"
+            "<body style='font-family:system-ui;background:#0b0f1a;color:#e8ecf7;"
+            "display:grid;place-items:center;min-height:100vh;margin:0'>"
+            "<div style='max-width:420px;padding:24px;text-align:center'>"
+            "<h2>Something went wrong</h2><p>The page could not load. "
+            "Please reload in a moment.</p>"
+            f"<p style='opacity:.6'>Reference {ref}</p>"
+            "<p><a style='color:#8ab4ff' href='/'>Reload</a></p></div>", 500)
+
+
 @app.before_request
 def _network_guard():
     # Only the networks / VLANs you list may reach the app; the admin page
