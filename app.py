@@ -8,8 +8,10 @@ import json
 import os
 import re
 import secrets
+import sqlite3
 import string
 import sys
+import threading
 import tempfile
 import time
 import zipfile
@@ -47,6 +49,7 @@ if config.TRUST_PROXY:
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
 db.init()
+db.start_backups()
 
 
 brand.load()
@@ -105,6 +108,12 @@ def _crash(e):
     data/error.log (and the console) and give the visitor a reference."""
     if isinstance(e, HTTPException):
         return e
+    if isinstance(e, sqlite3.DatabaseError) and any(
+            w in str(e).lower() for w in ("malformed", "not a database", "disk i/o")):
+        # The file broke while running. Stop; start.bat / start.sh start the app
+        # again at once and the start-up repair rebuilds it from the newest backup.
+        _elog.error("database damaged while running - restarting to repair: %s", e)
+        threading.Timer(1.0, lambda: os._exit(3)).start()
     import traceback
     ref = secrets.token_hex(3)
     _elog.error("ref %s  %s %s\n%s", ref, request.method, request.full_path,
@@ -120,6 +129,14 @@ def _crash(e):
             "Please reload in a moment.</p>"
             f"<p style='opacity:.6'>Reference {ref}</p>"
             "<p><a style='color:#8ab4ff' href='/'>Reload</a></p></div>", 500)
+
+
+@app.before_request
+def _guests_first():
+    # While guests are using the site the scan slows down a little, so pages
+    # and photos stay quick (see indexer._embed_file).
+    if not request.path.startswith(("/admin", "/static")):
+        indexer.guest_seen[0] = time.time()
 
 
 @app.before_request
@@ -1848,7 +1865,7 @@ def main():
         _open_browser(f"http://localhost:{port}/admin")
         try:
             from waitress import serve
-            serve(app, host=host, port=port, threads=8)
+            serve(app, host=host, port=port, threads=32)
         except ImportError:
             app.run(host=host, port=port, threaded=True)
 

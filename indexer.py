@@ -99,6 +99,8 @@ def thumb_path(pid):
 
 def _embed_file(job):
     """Runs in a scanning thread: read one photo, return its face signatures."""
+    if time.time() - guest_seen[0] < 3:        # a guest is on the site: let them go first
+        time.sleep(0.15)
     t0 = time.time()
     job["t_read"] = job["t_face"] = 0.0
     try:
@@ -154,6 +156,20 @@ def preview_path(row, small=False):
     tag = hashlib.sha256(f"{row['root']}|{row['relpath']}|{row['mtime']}|{row['stamp']}"
                          f"|{side}|{config.PREVIEW_TAG}".encode()).hexdigest()[:16]
     return config.CACHE_DIR / f"{row['id']}-{tag}{'-s' if small else ''}.jpg"
+
+
+guest_seen = [0.0]          # when a guest last used the site (set by app.py)
+
+
+def _lower_priority():
+    """Scan threads run below the web threads, so guests are served first."""
+    if os.name == "nt":
+        try:
+            import ctypes
+            k = ctypes.windll.kernel32
+            k.SetThreadPriority(k.GetCurrentThread(), -1)       # below normal
+        except Exception:
+            pass
 
 
 def drop_preview(pid):
@@ -222,7 +238,7 @@ def index_event(event_id):
         workers = config.SCAN_WORKERS
         if any(gdrive.is_drive(r) for r in roots):     # waiting for Google is not PC work
             workers = max(workers, config.DRIVE_WORKERS)
-        with ThreadPoolExecutor(workers) as pool:
+        with ThreadPoolExecutor(workers, initializer=_lower_priority) as pool:
             for batch in _batches(q):
                 todo = []
                 for job in batch:               # unchanged photos are not scanned again

@@ -57,7 +57,8 @@ CREATE TABLE IF NOT EXISTS audit(
 def connect():
     con = sqlite3.connect(config.DB_PATH, timeout=30)
     con.row_factory = sqlite3.Row
-    con.execute("PRAGMA journal_mode=WAL")
+    con.execute("PRAGMA journal_mode=" + ("WAL" if config.DB_WAL else "DELETE"))
+    con.execute("PRAGMA synchronous=" + ("NORMAL" if config.DB_WAL else "FULL"))
     con.execute("PRAGMA foreign_keys=ON")
     return con
 
@@ -69,7 +70,6 @@ def _healthy():
     try:
         con = sqlite3.connect(config.DB_PATH, timeout=30)
         try:
-            con.execute("PRAGMA journal_mode=WAL")
             return con.execute("PRAGMA quick_check").fetchone()[0] == "ok"
         finally:
             con.close()
@@ -97,6 +97,19 @@ def repair():
             config.DB_PATH.with_name(config.DB_PATH.name + suffix).unlink()
         except OSError:
             pass
+    restored = ""
+    backups = sorted(config.BACKUP_DIR.glob("facefind-*.db"), reverse=True)
+    for b in backups:                       # newest backup that is itself healthy
+        try:
+            t = sqlite3.connect(f"file:{b}?mode=ro", uri=True)
+            ok = t.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+            t.close()
+        except sqlite3.DatabaseError:
+            ok = False
+        if ok:
+            shutil.copy2(b, config.DB_PATH)
+            restored = f" Started from the backup {b.name}."
+            break
     new = sqlite3.connect(config.DB_PATH, timeout=30)
     new.executescript(SCHEMA)
     saved = lost = 0
@@ -132,9 +145,48 @@ def repair():
     if src:
         src.close()
     msg = (f"The database was damaged. Kept a copy in {keep}; rebuilt it and "
-           f"recovered {saved} records ({lost} table(s) cut short).")
+           f"recovered {saved} records ({lost} table(s) cut short).{restored}")
     print("WARNING:", msg, flush=True)
     return msg
+
+
+def backup_now():
+    """A copy of the whole database in data/backups (SQLite's own online backup,
+    safe while the app runs). Only a healthy database is copied, and only the
+    newest few are kept, so a damaged file can never replace a good copy."""
+    try:
+        config.BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+        src = connect()
+        try:
+            if src.execute("PRAGMA quick_check").fetchone()[0] != "ok":
+                return None
+            dest = config.BACKUP_DIR / time.strftime("facefind-%Y%m%d-%H%M%S.db")
+            tmp = dest.with_suffix(".tmp")
+            out = sqlite3.connect(tmp)
+            src.backup(out)
+            out.close()
+            tmp.replace(dest)
+        finally:
+            src.close()
+        for old in sorted(config.BACKUP_DIR.glob("facefind-*.db"), reverse=True)[config.BACKUPS_KEPT:]:
+            try:
+                old.unlink()
+            except OSError:
+                pass
+        return dest
+    except (sqlite3.DatabaseError, OSError):
+        return None
+
+
+def start_backups():
+    import threading
+
+    def loop():
+        while True:
+            time.sleep(max(1, config.BACKUP_EVERY_MIN) * 60)
+            backup_now()
+    backup_now()
+    threading.Thread(target=loop, daemon=True).start()
 
 
 def init():

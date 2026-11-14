@@ -233,6 +233,14 @@ search, and browsers may keep previews for an hour.
 
 ---
 
+## 14 November, 11:39
+
+**You:** (screenshot: "Something went wrong", reference a9b766) "why error is coming if 10 to 15 person is using ... why i was not updated above one" with a long log of `sqlite3.DatabaseError: database disk image is malformed` after "Album created", and "delet the my old data ; why again and agin its wrong and app is too too slow why bug is there".
+
+**Reply (short):** The file broke while the app was running (the same error as the morning, now from the album page). A load test on the app's own database code (6 writers and 15 readers for 25 seconds, 270,000 rows) found no damage, so the cause is the disk the file sits on (network/virtual/cloud-synced folder, antivirus), not the 10-15 guests. Changes: safe journal mode (no WAL) by default, automatic backups every 20 minutes in `data\backups`, restart + repair from the newest backup if the file breaks while running, scan slows down while guests are on the site and runs at lower priority, 32 web threads. The earlier loss of old albums was the empty rebuild; backups now prevent that. Asked the owner to send the `broken-db` copy to try to read old albums, and to keep `data` on a local disk (`DATA_DIR=C:\facefind-data`).
+
+---
+
 ## Still open
 
 - Wrong person in selfie results. Waiting for two answers from the owner:
