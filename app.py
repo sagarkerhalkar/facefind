@@ -81,7 +81,8 @@ def _close(_):
 
 
 def ip():
-    return request.remote_addr or ""
+    a = request.remote_addr or ""
+    return a[7:] if a.startswith("::ffff:") else a
 
 
 def err(msg, status=400):
@@ -1855,19 +1856,14 @@ def main():
         for addr in netutil.local_ips():
             print(f"On your LAN / VLAN:            {scheme}://{addr}:{port}/admin")
         print(f"If other devices cannot connect, allow TCP port {port} in the firewall.\n")
+    cert, key = netutil.ensure_cert(config.TLS_DIR, config.TLS_NAMES)
     if config.HTTPS:
-        cert, key = netutil.ensure_cert(config.TLS_DIR, config.TLS_NAMES)
         netutil.offer_trust(cert)
-        _open_browser(f"https://localhost:{port}/admin")
-        from werkzeug.serving import run_simple
-        run_simple(host, port, app, threaded=True, ssl_context=(str(cert), str(key)))
-    else:
-        _open_browser(f"http://localhost:{port}/admin")
-        try:
-            from waitress import serve
-            serve(app, host=host, port=port, threads=32)
-        except ImportError:
-            app.run(host=host, port=port, threaded=True)
+    _open_browser(f"{scheme}://127.0.0.1:{port}/admin")
+    threading.Thread(target=netutil.self_check, args=(port,), daemon=True).start()
+    # One port answers https:// AND http://, on 127.0.0.1, localhost and the LAN
+    # address, so a tunnel or proxy works whichever way it is set up.
+    netutil.serve_dual(app, host, port, cert, key)
 
 
 if __name__ == "__main__":

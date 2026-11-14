@@ -171,3 +171,82 @@ def offer_trust(cert_f):
     except Exception:
         pass
     print("Could not do it automatically. In the browser press Advanced > Proceed.")
+
+
+# --------------------------------------------------------------- one port, http AND https
+def serve_dual(app, host, port, cert, key):
+    """One port that answers both https:// and http://, on 127.0.0.1, localhost
+    (IPv4 and IPv6), and the LAN address. The first byte a client sends tells
+    which one it is: a TLS handshake starts with 0x16, plain HTTP with a letter.
+    So a tunnel, a proxy or a browser can use either, and nothing has to be
+    changed when you switch."""
+    import socket
+    import ssl
+    from werkzeug.serving import ThreadedWSGIServer, WSGIRequestHandler
+
+    tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    tls.load_cert_chain(str(cert), str(key))
+
+    class Handler(WSGIRequestHandler):
+        def make_environ(self):
+            env = super().make_environ()
+            if isinstance(self.connection, ssl.SSLSocket):
+                env["wsgi.url_scheme"] = "https"
+            if env.get("REMOTE_ADDR", "").startswith("::ffff:"):
+                env["REMOTE_ADDR"] = env["REMOTE_ADDR"][7:]
+            return env
+
+    class Server(ThreadedWSGIServer):
+        def server_bind(self):
+            if self.address_family == socket.AF_INET6:
+                try:
+                    self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+                except (OSError, AttributeError):
+                    pass
+            super().server_bind()
+
+        def process_request_thread(self, request, client_address):
+            try:
+                request.settimeout(15)
+                first = request.recv(1, socket.MSG_PEEK)
+                if not first:
+                    self.shutdown_request(request)
+                    return
+                if first == b"\x16":
+                    request = tls.wrap_socket(request, server_side=True)
+                request.settimeout(None)
+            except OSError:                 # includes ssl.SSLError: not worth a message
+                self.shutdown_request(request)
+                return
+            super().process_request_thread(request, client_address)
+
+    srv = None
+    if host in ("0.0.0.0", ""):             # every address, IPv4 and IPv6
+        try:
+            srv = Server("::", port, app, handler=Handler)
+        except OSError:
+            srv = None
+    if srv is None:
+        srv = Server(host or "0.0.0.0", port, app, handler=Handler)
+    srv.serve_forever()
+
+
+def self_check(port):
+    """After start-up, opens the app the ways a tunnel or browser would and says
+    in plain words which ones work."""
+    import ssl
+    import time
+    import urllib.request
+    time.sleep(2.5)
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    rows = []
+    for url in (f"http://127.0.0.1:{port}", f"https://127.0.0.1:{port}",
+                f"http://localhost:{port}", f"https://localhost:{port}"):
+        try:
+            with urllib.request.urlopen(url + "/brand/theme.css", timeout=8, context=ctx) as r:
+                rows.append(f"   OK    {url}" if r.status == 200 else f"   {r.status}   {url}")
+        except Exception as e:
+            rows.append(f"   FAIL  {url}   ({type(e).__name__})")
+    print("\nWeb check - the addresses that work on this computer:\n" + "\n".join(rows) + "\n", flush=True)
