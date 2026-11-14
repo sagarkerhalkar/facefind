@@ -48,12 +48,6 @@
     <li><svg class="ic"><use href="#g-lock"/></svg> Only you can download</li>
     <li><svg class="ic"><use href="#g-shield"/></svg> Verified by email code</li>
   </ul>
-  <div class="stack3d tilt" aria-hidden="true">
-    <div class="shot s3"><i class="face"></i></div>
-    <div class="shot s2"><i class="face"></i></div>
-    <div class="shot s1"><i class="face"></i><div class="scanbox"><b></b><u></u></div></div>
-    <div class="chip"><svg class="ic"><use href="#g-check"/></svg> 24 photos found</div>
-  </div>
   {{ flow(promos_before, "flow-before") }}
 </section>
 {% endif %}
@@ -160,6 +154,7 @@
   <section id="after" hidden>{% if promos_after %}<h2 class="after-title">From {{ brand }}</h2>{{ flow(promos_after, "flow-after") }}{% endif %}</section>
 {% endif %}
 </main>
+</div>
 {% if event or portal %}
 <section class="how" id="how"><h2>How it works</h2>
 <ol>
@@ -168,7 +163,6 @@
   <li><span class="n">3</span><h3>Download safely</h3><p>Verify your email once. Downloads go only to you.</p></li>
 </ol></section>
 {% endif %}
-</div>
 <p class="foot">Previews carry a watermark. Downloads go only to a verified email address and are recorded.</p>
 <script src="{{ url_for('static', filename='app.js') }}?v={{ static_v('app.js') }}"></script>
 </body>
