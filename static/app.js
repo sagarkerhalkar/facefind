@@ -99,6 +99,12 @@
     const inside = ["events", "selfie", "pending", "gallery"].includes(view);
     document.body.classList.toggle("in", inside);
     $("after").hidden = !inside;
+    const stepOf = { home: 1, signin: 1, otp: 1, events: 2, selfie: 3, pending: 3, gallery: 4 }[view] || 1;
+    document.body.dataset.step = stepOf;
+    document.querySelectorAll("#steps li").forEach((li) => {
+      const n = Number(li.dataset.s);
+      li.classList.toggle("on", n === stepOf); li.classList.toggle("done", n < stepOf);
+    });
     if (view !== "gallery") { picked.clear(); paintTray(); }
     if (push !== false && view !== current) history.pushState({ v: view }, "");
     current = view;
