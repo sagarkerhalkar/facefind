@@ -367,7 +367,8 @@
     const img = document.createElement("img");
     img.loading = "lazy";
     img.alt = "Preview of your photo";
-    img.src = "/api/preview/" + id;
+    img.decoding = "async";
+    img.src = "/api/preview/" + id + "?s=t";            // small copy for the tile; the viewer loads the large one
     img.addEventListener("load", () => fig.classList.add("ready"), { once: true });
     img.addEventListener("error", () => { img.alt = "This photo cannot be shown right now"; fig.classList.add("ready"); }, { once: true });
     img.tabIndex = 0;
@@ -437,7 +438,12 @@
   function move(n) { if (shown.length) { viewing = (viewing + n + shown.length) % shown.length; paintViewer(); } }
   function paintViewer() {
     const id = shown[viewing];
-    viewer.querySelector("img").src = "/api/preview/" + id;
+    const big = viewer.querySelector("img");
+    big.src = "/api/preview/" + id + "?s=t";            // shows at once, then sharpens
+    const sharp = new Image();
+    sharp.onload = () => { if (shown[viewing] === id) big.src = sharp.src; };
+    sharp.src = "/api/preview/" + id;
+    if (shown.length > 1) { new Image().src = "/api/preview/" + shown[(viewing + 1) % shown.length]; }   // next one, ahead of time
     viewer.querySelector(".v-count").textContent = (viewing + 1) + " of " + shown.length;
     const keep = viewer.querySelector(".v-save"), tick = viewer.querySelector(".v-pick");
     keep.textContent = saved.has(id) ? "Saved" : "Save";

@@ -95,6 +95,11 @@ DOWNLOAD_LINK_TTL = 120    # seconds
 _thr = os.environ.get("MATCH_THRESHOLD", "").strip()
 MATCH_THRESHOLD = float(_thr) if _thr not in ("", "0.40", "0.363") else 0.45
 MAX_RESULTS = 500
+# A small copy of every photo with a face is kept from the scan (about 30 KB
+# each), so the photo page loads at once - also for photos on Google Drive.
+THUMB_SIDE = 520
+THUMB_DIR = DATA_DIR / "thumbs"
+THUMB_DIR.mkdir(parents=True, exist_ok=True)
 PREVIEW_TAG = ""            # changes when the logo changes, so previews are made again
 PREVIEW_SIDE = 1400         # watermarked preview, large enough for the full-page view
 # Matching is stricter for tiny faces (their signatures are less reliable), and

@@ -205,6 +205,20 @@ decision.
 
 **Claude:** Added this file.
 
+## 14 November, 08:20
+
+**Owner** (with six WhatsApp voice notes from a guest):
+
+> loading is taking too much time app expriance is too too bed look what one
+> of user is says about our app its very very bed and allwas git update
+
+**Claude:** Could not listen to the voice notes (no speech-to-text tool in
+the session) and asked for the guest's points in text. Made the photo page
+load faster: the scan keeps a small copy of every photo with a face, tiles
+are made from it, the first tiles are prepared right after the selfie
+search, and browsers may keep previews for an hour.
+[Pull request #9](https://github.com/sagarkerhalkar/facefind/pull/9)
+
 ---
 
 ## Still open
@@ -214,5 +228,6 @@ decision.
   buy a commercial face-model licence or use a paid cloud face service.
 - Scan speed on the owner's PC. Waiting for the album status line that shows
   the seconds per photo for reading and for finding faces.
+- What the guest said in the six voice notes of 13 November (needed as text).
 - Not yet tested on the real setup: Google Drive, OTP mail, `start-web.bat`,
   Safari, Firefox, a real phone.
