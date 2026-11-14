@@ -275,3 +275,5 @@ search, and browsers may keep previews for an hour.
 - What the guest said in the six voice notes of 13 November (needed as text).
 - Not yet tested on the real setup: Google Drive, OTP mail, `start-web.bat`,
   Safari, Firefox, a real phone.
+
+- 14 Nov 13:31: Admin made fast and live (merged), then the guest site redesigned to a light international style (step 33 in PROJECT-LOG).

@@ -13,20 +13,47 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0d0b1a">
+<meta name="theme-color" content="#faf8f5">
 <title>{{ event.name if event else ("Find your photos" if portal else "Link not found") }} - {{ brand }}</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v={{ static_v('style.css') }}">
 <link rel="stylesheet" href="{{ url_for('brand_theme') }}?v={{ studio.v }}">
 </head>
-<body class="guest">
+<body class="guest" data-step="0">
+<svg class="hid" width="0" height="0" aria-hidden="true"><defs>
+<symbol id="g-camera" viewBox="0 0 24 24"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></symbol>
+<symbol id="g-lock" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></symbol>
+<symbol id="g-shield" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></symbol>
+<symbol id="g-eye-off" viewBox="0 0 24 24"><path d="M17.9 17.9A10.9 10.9 0 0112 20c-7 0-11-8-11-8a18.5 18.5 0 015.1-5.9M9.9 4.2A9.1 9.1 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.2 3.2M14.1 14.1a3 3 0 11-4.2-4.2M1 1l22 22"/></symbol>
+<symbol id="g-heart" viewBox="0 0 24 24"><path d="M20.8 4.6a5.5 5.5 0 00-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 00-7.8 7.8l1 1.1L12 21l7.8-7.5 1-1.1a5.5 5.5 0 000-7.8z"/></symbol>
+<symbol id="g-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></symbol>
+<symbol id="g-check" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></symbol>
+<symbol id="g-x" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></symbol>
+<symbol id="g-left" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></symbol>
+<symbol id="g-right" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></symbol>
+<symbol id="g-spark" viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z"/></symbol>
+<symbol id="g-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0116 0"/></symbol>
+</defs></svg>
 <div class="backdrop" aria-hidden="true"></div>
 <header class="top"><span class="mark">{% if studio.logo %}<img src="{{ url_for('brand_logo') }}?v={{ studio.v }}" alt="{{ brand }}">{% else %}{{ brand }}{% endif %}</span>
-{% if event %}<span class="evname">{{ event.name }}</span>{% endif %}</header>
+{% if event %}<span class="evname">{{ event.name }}</span>{% endif %}
+{% if event or portal %}<ol class="steps{{ '' if portal else ' solo' }}" id="steps" aria-label="Progress"><li data-s="1"><i>1</i><span>Sign in</span></li><li data-s="2"><i>2</i><span>Events</span></li><li data-s="3"><i>{{ 3 if portal else 2 }}</i><span>Selfie</span></li><li data-s="4"><i>{{ 4 if portal else 3 }}</i><span>Photos</span></li></ol>{% endif %}</header>
 <div class="stage">
 {% if event or portal %}
 <section class="pitch">
-  <h1>{{ event.name if event else "Your photos are waiting" }}</h1>
+  <span class="eyebrow"><svg class="ic"><use href="#g-spark"/></svg> Photos found by your face</span>
+  <h1>{{ event.name if event else "Find every photo you are in" }}</h1>
   <p class="lead">{{ studio.tagline }}</p>
+  <ul class="trust">
+    <li><svg class="ic"><use href="#g-eye-off"/></svg> Your selfie is never kept</li>
+    <li><svg class="ic"><use href="#g-lock"/></svg> Only you can download</li>
+    <li><svg class="ic"><use href="#g-shield"/></svg> Verified by email code</li>
+  </ul>
+  <div class="stack3d tilt" aria-hidden="true">
+    <div class="shot s3"><i class="face"></i></div>
+    <div class="shot s2"><i class="face"></i></div>
+    <div class="shot s1"><i class="face"></i><div class="scanbox"><b></b><u></u></div></div>
+    <div class="chip"><svg class="ic"><use href="#g-check"/></svg> 24 photos found</div>
+  </div>
   {{ flow(promos_before, "flow-before") }}
 </section>
 {% endif %}
@@ -37,7 +64,8 @@
 {% else %}
   <p id="msg" class="msg" role="alert" hidden></p>
 
-  <section class="card tilt" id="v-home" hidden>
+  <section class="card" id="v-home" hidden>
+    <span class="badge-ic"><svg class="ic"><use href="#g-camera"/></svg></span>
     <h2>Find your photos</h2>
     <p>Take one selfie and see every photo you are in. No code needed to look.</p>
     <label class="check"><input id="consent" type="checkbox">
@@ -46,13 +74,13 @@
     <button type="button" class="link" id="to-signin">I have saved photos - sign in</button>
   </section>
 
-  <section class="card tilt" id="v-signin" hidden>
-    <button type="button" class="back" data-back>Back</button>
+  <section class="card" id="v-signin" hidden>
+    <button type="button" class="back" data-back><svg class="ic"><use href="#g-left"/></svg> Back</button>
     <h2>Sign in</h2>
     <p id="si-why">We email you a one-time code, so your photos reach only you.</p>
     <form id="f-email">
       <label for="gname">Your name</label>
-      <input id="gname" type="text" autocomplete="name" required minlength="2" maxlength="80">
+      <input id="gname" type="text" autocomplete="name" required minlength="2" maxlength="80" placeholder="Asha Patil">
       <label for="phone">Phone number</label>
       <input id="phone" type="tel" autocomplete="tel" inputmode="tel" required pattern="[+0-9 ()\-]{7,20}" placeholder="98765 43210">
       <label for="email">Email address</label>
@@ -63,20 +91,20 @@
     </form>
   </section>
 
-  <section class="card tilt" id="v-otp" hidden>
-    <button type="button" class="back" data-back>Back</button>
+  <section class="card" id="v-otp" hidden>
+    <button type="button" class="back" data-back><svg class="ic"><use href="#g-left"/></svg> Back</button>
     <h2>Enter the code</h2>
     <p>We sent a 6-digit code to <b id="otp-email"></b>. It is valid for 5 minutes. Check the spam folder too.</p>
     <form id="f-otp">
       <label for="otp">6-digit code</label>
-      <input id="otp" class="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required>
+      <input id="otp" class="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required placeholder="000000">
       <button type="submit" class="wide">Verify and continue</button>
       <button type="button" class="link" id="resend">Send a new code</button>
     </form>
   </section>
 
   <section class="card" id="v-events" hidden>
-    <button type="button" class="back" data-back>Back</button>
+    <button type="button" class="back" data-back><svg class="ic"><use href="#g-left"/></svg> Back</button>
     <h2 id="ev-hello">Choose your events</h2>
     <p>Pick the dates, then tick the events you attended.</p>
     <div class="row dates">
@@ -94,17 +122,18 @@
   </section>
 
   <section class="card" id="v-selfie" hidden>
-    <button type="button" class="back" data-back>Back</button>
+    <button type="button" class="back" data-back><svg class="ic"><use href="#g-left"/></svg> Back</button>
     <h2>Take a selfie</h2>
     <p>Look straight at the camera, alone, in good light. Avoid glare on glasses.</p>
-    <div class="cam" id="cam"><video id="video" autoplay playsinline muted></video></div>
+    <div class="cam" id="cam"><video id="video" autoplay playsinline muted></video><span class="guide" aria-hidden="true"></span><span class="sweep" aria-hidden="true"></span></div>
     <canvas id="canvas" hidden></canvas>
-    <button id="snap" type="button" class="wide">Take selfie and find my photos</button>
+    <button id="snap" type="button" class="wide"><svg class="ic"><use href="#g-camera"/></svg> Take selfie and find my photos</button>
     <label for="upload">Or upload a clear photo of your face</label>
     <input id="upload" type="file" accept="image/*">
   </section>
 
   <section class="card" id="v-pending" hidden>
+    <span class="badge-ic"><svg class="ic"><use href="#g-user"/></svg></span>
     <h2>Waiting for approval</h2>
     <p>The photographer reviews each request before photos are shown. Keep this page open; it updates by itself.</p>
   </section>
@@ -112,8 +141,8 @@
   <section id="v-gallery" hidden>
     <div class="bar">
       <h1 id="g-title">Your photos</h1>
-      <div class="tools"><button id="dl-all" type="button">Download all</button>
-      <button id="show-saved" type="button" class="ghost">My saved photos</button>
+      <div class="tools"><button id="dl-all" type="button"><svg class="ic"><use href="#g-download"/></svg> Download all</button>
+      <button id="show-saved" type="button" class="ghost"><svg class="ic"><use href="#g-heart"/></svg> My saved photos</button>
       <button id="show-found" type="button" class="ghost" hidden>Back to results</button>
       <button id="retry" type="button" class="ghost">New search</button>
       <button id="forget" type="button" class="ghost">Sign out</button></div>
@@ -124,15 +153,23 @@
     <div id="grid" class="grid"></div>
     <div class="tray" id="tray" hidden><span id="tray-count"></span>
       <span><button type="button" class="ghost small" id="tray-clear">Clear</button>
-      <button type="button" class="small" id="tray-dl">Download selected</button></span></div>
+      <button type="button" class="small" id="tray-dl"><svg class="ic"><use href="#g-download"/></svg> Download selected</button></span></div>
   </section>
 
   {% if promos_before %}<section class="phone-flow">{{ flow(promos_before, "flow-phone") }}</section>{% endif %}
   <section id="after" hidden>{% if promos_after %}<h2 class="after-title">From {{ brand }}</h2>{{ flow(promos_after, "flow-after") }}{% endif %}</section>
-  <p class="foot">Previews carry a watermark. Downloads go only to a verified email address and are recorded.</p>
 {% endif %}
 </main>
+{% if event or portal %}
+<section class="how" id="how"><h2>How it works</h2>
+<ol>
+  <li><span class="n">1</span><h3>Take a selfie</h3><p>One clear photo of your face. It is used once and never stored.</p></li>
+  <li><span class="n">2</span><h3>See your photos</h3><p>We find every photo you are in, across all the events you choose.</p></li>
+  <li><span class="n">3</span><h3>Download safely</h3><p>Verify your email once. Downloads go only to you.</p></li>
+</ol></section>
+{% endif %}
 </div>
+<p class="foot">Previews carry a watermark. Downloads go only to a verified email address and are recorded.</p>
 <script src="{{ url_for('static', filename='app.js') }}?v={{ static_v('app.js') }}"></script>
 </body>
 </html>
