@@ -1,5 +1,6 @@
 """End-to-end check of the security rules with a stand-in face engine
 (colour = person). Run:  python tests/test_flow.py"""
+import sqlite3
 import base64, io, os, sys, tempfile, time
 from pathlib import Path
 
@@ -648,18 +649,25 @@ assert adm.get("/admin").status_code == 200
 _c.close()
 print("ok  an old album can be deleted, downloads report kept")
 
-# a damaged database repairs itself instead of stopping the app
+# a damaged database repairs itself instead of stopping the app (own file, so
+# Windows' open handles on the live database cannot get in the way)
 import db
-_con = db.connect(); _con.execute("INSERT OR REPLACE INTO kv(k,v) VALUES('repair-test','kept')"); _con.commit(); _con.close()
-_dbf = config.DB_PATH
-with open(_dbf, "r+b") as _f:                       # wreck the middle of the file
-    _f.seek(0); _f.write(b"\x00garbage" * 800)
-for _x in ("-wal", "-shm"):
-    try: _dbf.with_name(_dbf.name + _x).unlink()
-    except OSError: pass
-db.init()                                           # must not raise
-_con = db.connect(); assert _con.execute("PRAGMA quick_check").fetchone()[0] == "ok"
-_con.execute("SELECT count(*) FROM events"); _con.close()
-assert list((config.DATA_DIR / "broken-db").glob("*/facefind.db"))
+_live = config.DB_PATH
+config.DB_PATH = config.DATA_DIR / "repair-test.db"
+try:
+    db.init()
+    _con = db.connect(); _con.execute("INSERT OR REPLACE INTO kv(k,v) VALUES('repair-test','kept')"); _con.commit(); _con.close()
+    _con = sqlite3.connect(config.DB_PATH); _con.execute("PRAGMA wal_checkpoint(TRUNCATE)"); _con.close()
+    with open(config.DB_PATH, "r+b") as _f:         # wreck the start of the file
+        _f.seek(0); _f.write(b"\x00garbage" * 800)
+    for _x in ("-wal", "-shm"):
+        try: config.DB_PATH.with_name(config.DB_PATH.name + _x).unlink()
+        except OSError: pass
+    db.init()                                       # must not raise
+    _con = db.connect(); assert _con.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+    _con.execute("SELECT count(*) FROM events"); _con.close()
+    assert list((config.DATA_DIR / "broken-db").glob("*/repair-test.db"))
+finally:
+    config.DB_PATH = _live
 print("ok  damaged database is kept aside, rebuilt, and the app starts")
 print("ALL TESTS PASSED")
