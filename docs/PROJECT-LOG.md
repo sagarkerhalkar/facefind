@@ -4,6 +4,9 @@ A record of the conversation in which this app was planned and built
 (11–12 November 2026). Mail addresses, network addresses and company names
 are left out on purpose, because this file is stored on GitHub.
 
+The owner's messages as typed, from 12 November on, are in
+[CHAT-LOG.md](CHAT-LOG.md).
+
 ## The goal
 
 A web app like Photomall / Picsdrop for a very large photo collection spread
