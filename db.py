@@ -77,6 +77,23 @@ def _healthy():
         return False
 
 
+def is_damage(e):
+    """True for the SQLite errors that mean the database file itself is broken."""
+    m = str(e).lower()
+    return isinstance(e, sqlite3.DatabaseError) and any(
+        t in m for t in ("malformed", "not a database", "disk i/o error", "corrupt"))
+
+
+def restart_to_repair(why=""):
+    """A broken database is repaired at start-up, when no other part of the app
+    has the file open (Windows will not let a file in use be replaced). So the
+    app ends itself with exit code 75 and start.bat / start.sh start it again."""
+    import os
+    import threading
+    print(f"\n!! The database is damaged ({why}). Restarting to repair it ...\n", flush=True)
+    threading.Timer(1.5, lambda: os._exit(75)).start()
+
+
 def repair():
     """A damaged data/facefind.db (power cut, drive full, copied while the app
     was running, cloud-sync folder) used to stop the whole app. Now: keep the
@@ -93,10 +110,16 @@ def repair():
             shutil.copy2(f, keep / f.name)
     old = keep / config.DB_PATH.name
     for suffix in ("", "-wal", "-shm"):
+        f = config.DB_PATH.with_name(config.DB_PATH.name + suffix)
         try:
-            config.DB_PATH.with_name(config.DB_PATH.name + suffix).unlink()
-        except OSError:
+            f.unlink()
+        except FileNotFoundError:
             pass
+        except OSError:
+            raise SystemExit(
+                f"\n  The database is damaged and {f.name} is in use by another program.\n"
+                "  Close every other facefind window (and any program using the data folder), "
+                "then start again.\n")
     new = sqlite3.connect(config.DB_PATH, timeout=30)
     new.executescript(SCHEMA)
     saved = lost = 0

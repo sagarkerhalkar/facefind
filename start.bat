@@ -23,5 +23,7 @@ if not exist .env (
     exit /b 1
   )
 )
+:run
 python app.py
+if errorlevel 75 goto run
 pause

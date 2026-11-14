@@ -233,6 +233,14 @@ search, and browsers may keep previews for an hour.
 
 ---
 
+## 14 November, 11:37
+
+**You:** (screenshot: "Something went wrong, Reference a9b766") "why error is coming if 10 to 15 person is using ... why i was not updated above one what you given" with a log of many `sqlite3.DatabaseError: database disk image is malformed` errors on `GET /admin` after "Album created".
+
+**Reply (short):** The database file was damaged while the app was running, so every page that needed it failed. The repair added earlier only ran at start-up. Now: (1) the app ends itself with code 75 when it meets a damaged database and `start.bat` / `start.sh` start it again, so the repair runs at once with nothing else holding the file; (2) only one copy of the app may use the data folder (a second one is refused, because two copies on one database damage it); (3) if the damaged file cannot be replaced because another program holds it, the app says so instead of carrying on.
+
+---
+
 ## Still open
 
 - Wrong person in selfie results. Waiting for two answers from the owner:

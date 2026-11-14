@@ -171,3 +171,27 @@ def offer_trust(cert_f):
     except Exception:
         pass
     print("Could not do it automatically. In the browser press Advanced > Proceed.")
+
+
+_lock_file = None
+
+
+def single_instance(path):
+    """Only one copy of the app may use the data folder: two copies writing the
+    same database file is what damages it. The lock goes when the app ends."""
+    global _lock_file
+    f = open(path, "a+")
+    try:
+        if os.name == "nt":
+            import msvcrt
+            f.seek(0)
+            msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        f.close()
+        raise RuntimeError("Facefind is already running (another window or a service). "
+                           "Close that one first - two copies on the same data folder "
+                           "damage the database.")
+    _lock_file = f
