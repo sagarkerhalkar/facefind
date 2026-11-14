@@ -59,8 +59,8 @@
     <div><label for="event_date">Date of the event</label>
     <input id="event_date" name="event_date" type="date" value="{{ today }}"></div></div>
     <label for="folders">Where are the photos?</label>
-    <textarea id="folders" name="folders" rows="4" required placeholder="https://drive.google.com/drive/folders/...   or   D:\Photos\Sharma"></textarea>
-    <p class="hint">One per line. Paste a Google Drive folder link, or choose a folder on this computer or any connected drive. You can mix both. Photos on Drive are scanned there - nothing is copied.{% if not drive_email %} <b>Google Drive is not connected yet{% if owner %} - connect it under Settings{% else %} - ask the owner{% endif %}.</b>{% endif %}</p>
+    <textarea id="folders" name="folders" rows="4" required placeholder="D:\Photos\Sharma   or   https://drive.google.com/drive/folders/...   or   s3://bucket/folder   or   dropbox:/Folder"></textarea>
+    <p class="hint">One per line. Use a folder on this computer or a network drive, a Google Drive link, <code>s3://bucket/folder</code> or <code>dropbox:/Folder</code>. You can mix them. Photos on Drive are scanned there - nothing is copied.{% if not drive_email %} <b>Google Drive is not connected yet{% if owner %} - connect it under Settings{% else %} - ask the owner{% endif %}.</b>{% endif %}</p>
     {% if drive_email %}<p class="hint">Share each Drive folder with <code>{{ drive_email }}</code> (Viewer) before pasting its link.</p>{% endif %}
     <button type="button" class="ghost small" id="browse-open"><svg class="ic"><use href="#i-folder"/></svg> Choose folder on this computer</button>
     <div id="browser" class="browser" hidden>

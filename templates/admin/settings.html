@@ -23,6 +23,36 @@
 <button type="submit">Connect Google Drive</button></form>
 {% endif %}</div>
 
+
+<div class="card"><h2>Amazon S3 (also Cloudflare R2, Backblaze B2, Wasabi, MinIO)</h2>
+{% if s3_on %}<p class="status ready">Connected (access key {{ s3.access_key[:4] }}...). Use <code>s3://bucket/folder</code> as an album folder. Photos stay in S3 and are read from there. Run this app in the same region as the bucket for the fastest scan.</p>
+<form method="post" action="{{ url_for('admin_sources') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="what" value="s3_off"><button type="submit" class="ghost">Disconnect S3</button></form>
+{% else %}<p class="status">Not connected. Create an access key that can only read (s3:ListBucket and s3:GetObject), then enter it:</p>{% endif %}
+<form method="post" action="{{ url_for('admin_sources') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="what" value="s3">
+<label for="s3k">Access key ID</label><input id="s3k" name="access_key" type="text" autocomplete="off" required value="{{ s3.access_key }}">
+<label for="s3s">Secret access key{% if s3_on %} (leave empty to keep the saved one){% endif %}</label><input id="s3s" name="secret_key" type="password" autocomplete="new-password" {{ '' if s3_on else 'required' }}>
+<div class="row"><div><label for="s3r">Region</label><input id="s3r" name="region" type="text" value="{{ s3.region }}" placeholder="ap-south-1"></div>
+<div><label for="s3e">Endpoint (only for R2, B2, MinIO ...)</label><input id="s3e" name="endpoint" type="text" value="{{ s3.endpoint }}" placeholder="https://ACCOUNT.r2.cloudflarestorage.com"></div></div>
+<label for="s3b">Test with a bucket (optional)</label><input id="s3b" name="bucket" type="text" placeholder="my-photos/events">
+<button type="submit">{{ 'Save changes' if s3_on else 'Connect S3' }}</button></form></div>
+
+<div class="card"><h2>Dropbox</h2>
+{% if dbx_on %}<p class="status ready">Connected. Use <code>dropbox:/Folder</code> (or paste the address from dropbox.com) as an album folder. Photos stay in Dropbox.</p>
+<form method="post" action="{{ url_for('admin_sources') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="what" value="dbx_off"><button type="submit" class="ghost">Disconnect Dropbox</button></form>
+{% else %}
+<ol class="hint"><li>Open <b>dropbox.com/developers/apps</b>, Create app, Scoped access, Full Dropbox, name it facefind.</li>
+<li>Permissions tab: tick <b>files.metadata.read</b> and <b>files.content.read</b>, press Submit.</li>
+<li>Settings tab: copy the App key and App secret and enter them here.</li></ol>
+<form method="post" action="{{ url_for('admin_sources') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="what" value="dbx_key">
+<label for="dk">App key</label><input id="dk" name="app_key" type="text" autocomplete="off" required value="{{ dbx_key }}">
+<label for="ds">App secret</label><input id="ds" name="app_secret" type="password" autocomplete="new-password" required>
+<button type="submit">Save and get the access link</button></form>
+{% if dbx_url %}<p class="hint">Now open <a href="{{ dbx_url }}" target="_blank" rel="noopener noreferrer">this Dropbox page</a>, press Allow, and paste the code it shows:</p>
+<form method="post" action="{{ url_for('admin_sources') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="what" value="dbx_code">
+<label for="dc">Code from Dropbox</label><input id="dc" name="code" type="text" autocomplete="off" required>
+<button type="submit">Connect Dropbox</button></form>{% endif %}
+{% endif %}</div>
+
 <form class="card" method="post" action="{{ url_for('admin_settings') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="what" value="look_first">
 <h2>Looking before signing in</h2>
 <label class="check"><input type="checkbox" name="look_first" {{ 'checked' if look_first }}><span>Guests can take a selfie and see their watermarked previews without a code. Downloading and saving still need name, phone and the email code.</span></label>

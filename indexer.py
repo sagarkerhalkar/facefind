@@ -18,6 +18,7 @@ import config
 import db
 import faces
 import gdrive
+import sources
 
 progress = {}          # event_id -> dict(state, done, total, faces, error, ...)
 _cache = {}            # event_id -> (matrix, photo_ids, face widths)
@@ -43,16 +44,15 @@ def _scan(folder, others):
 def _jobs(roots, others, notes, complete):
     """Every photo of every source of the album, as it is found."""
     for root in roots:
-        if gdrive.is_drive(root):
-            fid = root[7:]
+        if sources.is_remote(root):
             try:
-                gdrive.remember_name(fid, gdrive.folder_name(fid))
-                for rel, info in gdrive.walk(fid):
+                for rel, info in sources.walk(root):
+                    info.setdefault("src", "drive")
                     yield dict(root=root, rel=rel, path=None, info=info, mtime=0.0,
-                               stamp=gdrive.stamp(info), ref=info["id"])
+                               stamp=sources.stamp(info), ref=info["id"])
                 complete.add(root)
             except gdrive.DriveError as e:
-                notes.append(f"{gdrive.label(root)}: {e}")
+                notes.append(f"{sources.label(root)}: {e}")
         elif not Path(root).is_dir():
             notes.append(f"Not reachable, skipped: {root}")
         else:
@@ -64,6 +64,15 @@ def _jobs(roots, others, notes, complete):
                 yield dict(root=root, rel=rel, path=path, info=None, mtime=mtime,
                            stamp="", ref="")
             complete.add(root)
+
+
+def _remote_image(info):
+    """A photo from Drive, S3 or Dropbox as pixels, read into memory only."""
+    got = sources.scan_image_bytes(info)
+    if got is None:
+        return _drive_image(info)
+    data, ext, how = got
+    return faces.load(data, ext), how
 
 
 def _drive_image(info):
@@ -108,7 +117,7 @@ def _embed_file(job):
     job["t_read"] = job["t_face"] = 0.0
     try:
         if job["info"] is not None:
-            img, job["how"] = _drive_image(job["info"])
+            img, job["how"] = _remote_image(job["info"])
         else:
             img, job["how"] = faces.load(job["path"].read_bytes(), job["path"].suffix), "file"
         t1 = time.time()
@@ -245,7 +254,7 @@ def index_event(event_id):
         threading.Thread(target=finder, daemon=True).start()
         st["phase"] = ""
         workers = config.SCAN_WORKERS
-        if any(gdrive.is_drive(r) for r in roots):     # waiting for Google is not PC work
+        if any(sources.is_remote(r) for r in roots):     # waiting for Google is not PC work
             workers = max(workers, config.DRIVE_WORKERS)
         with ThreadPoolExecutor(workers, initializer=_lower_priority) as pool:
             for batch in _batches(q):
@@ -266,7 +275,7 @@ def index_event(event_id):
                         st["bad_count"] += 1
                         st["bad"] = f"{job['rel']}: {problem}"
                         con.execute("INSERT INTO scan_errors(event_id,relpath,reason) VALUES(?,?,?)",
-                                    (event_id, f"{gdrive.label(job['root'])} / {job['rel']}",
+                                    (event_id, f"{sources.label(job['root'])} / {job['rel']}",
                                      problem))
                         continue
                     key = (job["root"], job["rel"])
