@@ -33,6 +33,10 @@ import config
 import db
 import faces
 import gdrive
+import sources
+import sourcecfg
+import s3src
+import dropbox_src
 import indexer
 import mailer
 import netutil
@@ -281,7 +285,7 @@ def record_download(c, s, row):
 
 def real_path(folders, root, relpath):
     """Only files inside a folder that is still on the event's list."""
-    if root not in db.split_folders(folders) or gdrive.is_drive(root):
+    if root not in db.split_folders(folders) or sources.is_remote(root):
         abort(404)
     base = Path(root).resolve()
     p = (base / relpath).resolve()
@@ -310,17 +314,17 @@ def preview_file(row, small=False):
         except (OSError, ValueError):
             pass
     try:
-        if gdrive.is_drive(row["root"]) and not old_copy(row):
+        if sources.is_remote(row["root"]) and not old_copy(row):
             if not row["ref"]:
                 g.why = "scanned by an older version - press 'Scan again' and wait for green"
                 abort(404)
             ext = ""
             try:
-                data = gdrive.fetch_small({"id": row["ref"]}, 1200)    # a JPEG made by Google
+                data = sources.fetch_small(row["ref"], 1200, Path(row["relpath"]).name)   # a JPEG made by the service
                 if not data:
-                    data, ext = gdrive.fetch_full(row["ref"]), Path(row["relpath"]).suffix
+                    data, ext = sources.fetch_full(row["ref"]), Path(row["relpath"]).suffix
             except gdrive.DriveError as e:
-                g.why = f"Google Drive: {e}"
+                g.why = f"{sources.label(row['root'])}: {e}"
                 abort(503)
             make_preview(io.BytesIO(data), dest, ext, side)
         else:
@@ -336,7 +340,7 @@ def preview_file(row, small=False):
 def drive_download(ref, name):
     """Passes the original from Google Drive straight on to the guest."""
     try:
-        r = gdrive.open_original(ref)
+        r = sources.open_original(ref)
     except gdrive.DriveError:
         abort(503)
 
@@ -840,10 +844,10 @@ def _warm_one(row):
 
 def photo_bytes(row):
     """The original file of one photo, read into memory."""
-    if gdrive.is_drive(row["root"]) and not old_copy(row):
+    if sources.is_remote(row["root"]) and not old_copy(row):
         if not row["ref"]:
-            raise OSError("no Drive id")
-        return gdrive.fetch_full(row["ref"])
+            raise OSError("no remote id")
+        return sources.fetch_full(row["ref"])
     p = old_copy(row) or real_path(row["folders"], row["root"], row["relpath"])
     if p.stat().st_size > config.MAX_PHOTO_BYTES:
         raise OSError("too large")
@@ -882,9 +886,9 @@ def zip_download(c, s, rows):
             elif old_copy(r):
                 n += 1
                 z.write(old_copy(r), f"{n:04d}_{name}")
-            elif gdrive.is_drive(r["root"]):         # straight from Drive into the zip
+            elif sources.is_remote(r["root"]):         # straight from the cloud into the zip
                 try:
-                    src = gdrive.open_original(r["ref"])
+                    src = sources.open_original(r["ref"])
                 except gdrive.DriveError:
                     continue
                 n += 1
@@ -983,7 +987,7 @@ def download(token):
     if marked:
         return send_file(io.BytesIO(marked[0]), mimetype="image/jpeg", as_attachment=True,
                          download_name=marked[1])
-    if gdrive.is_drive(row["root"]) and row["ref"]:
+    if sources.is_remote(row["root"]) and row["ref"]:
         return drive_download(row["ref"], Path(row["relpath"]).name)
     if old_copy(row):
         return send_file(old_copy(row), as_attachment=True, download_name=Path(row["relpath"]).name)
@@ -1184,8 +1188,8 @@ def admin():
         e = dict(e)
         e["photos"], e["faces"], e["n_errors"] = n_ph.get(e["id"], 0), n_fc.get(e["id"], 0), n_er.get(e["id"], 0)
         e["status"], e["state"] = status_text(e["id"], e["photos"], e["faces"])
-        e["folder_list"] = [(f"Google Drive: {names.get(f[7:]) or f[7:]}" if gdrive.is_drive(f) else f,
-                             gdrive.is_drive(f) or fast_isdir(f))
+        e["folder_list"] = [(f"Google Drive: {names.get(f[7:]) or f[7:]}" if gdrive.is_drive(f) else sources.label(f),
+                             sources.is_remote(f) or fast_isdir(f))
                             for f in db.split_folders(e["folders"])]
         e["link"] = guest_link(e["code"])
         e["errors"] = c.execute("SELECT relpath, reason FROM scan_errors WHERE event_id=? LIMIT 200",
@@ -1461,6 +1465,10 @@ def admin_settings_page():
     return admin_page("settings", reported=reported, look_first=brand.get(c, "look_first") == "1",
                       threshold=f"{config.MATCH_THRESHOLD:.2f}",
                       scan_side=config.SCAN_SIDE, drive_email=gdrive.robot_email(),
+                      s3=s3src.settings(), s3_on=s3src.connected(),
+                      dbx_on=dropbox_src.connected(), dbx_key=dropbox_src.settings().get("app_key", ""),
+                      dbx_url=(dropbox_src.authorize_url(dropbox_src.settings()["app_key"])
+                               if dropbox_src.settings().get("app_key") else ""),
                       log=c.execute("SELECT * FROM audit ORDER BY id DESC LIMIT 200").fetchall())
 
 
@@ -1586,7 +1594,7 @@ def speed_report():
     folders = []
     for r in c.execute("SELECT name, folders FROM events ORDER BY id DESC LIMIT 60"):
         for fo in db.split_folders(r["folders"]):
-            if not gdrive.is_drive(fo):
+            if not sources.is_remote(fo):
                 folders.append((r["name"], fo))
     slow = []
     def probe(item):
@@ -1805,17 +1813,20 @@ def admin_event_create():
 
 
 def _clean_folders(text):
-    """Each line is a folder on this computer or a Google Drive folder link."""
+    """Each line is a folder on this computer, a network drive, a Google Drive
+    link, s3://bucket/prefix or dropbox:/Folder."""
     good, bad = [], []
     for f in db.split_folders(text):
-        fid = gdrive.parse_link(f)
-        if fid:
-            entry = "gdrive:" + fid
-            if not gdrive.key_info():
-                bad.append("Google Drive is not connected yet - see 'Google Drive links' on this page")
+        parsed = sources.parse_link(f)
+        if parsed:
+            kind, entry = parsed
+            if not sources.connected(kind):
+                bad.append({"drive": "Google Drive is not connected yet - see 'Google Drive links' on this page",
+                            "s3": f"{f} (S3 is not connected yet - enter the access key under Settings, Cloud storage)",
+                            "dropbox": f"{f} (Dropbox is not connected yet - connect it under Settings, Cloud storage)"}[kind])
                 continue
-            # Whether the robot can see the folder is checked by the scan itself, in the
-            # background (it says so on the album card), so adding an album never waits.
+            # Whether the service lets us in is checked by the scan itself, in the background
+            # (it says so on the album card), so adding an album never waits.
             if entry not in good:
                 good.append(entry)
         elif f.lower().startswith(("http://", "https://")):
@@ -1827,6 +1838,60 @@ def _clean_folders(text):
         else:
             bad.append(f)
     return good, bad
+
+
+@app.post("/admin/sources")
+def admin_sources():
+    """Connect or disconnect Amazon S3 (and compatible) and Dropbox. Owner only."""
+    if not owner_post_ok():
+        abort(403)
+    f = request.form
+    back = lambda m: redirect(url_for("admin_settings_page", msg=m))     # noqa: E731
+    what = f.get("what", "")
+    if what == "s3":
+        old = s3src.settings()
+        vals = {"access_key": f.get("access_key", "").strip(),
+                "secret_key": f.get("secret_key", "").strip() or old["secret_key"],
+                "region": f.get("region", "").strip() or "ap-south-1",
+                "endpoint": f.get("endpoint", "").strip().rstrip("/")}
+        if not vals["access_key"] or not vals["secret_key"]:
+            return back("Enter the access key and the secret key.")
+        sourcecfg.save("s3", vals)
+        bucket = f.get("bucket", "").strip()
+        if bucket:
+            try:
+                s3src.check(s3src.parse_link("s3://" + bucket.replace("s3://", "")) or "")
+            except Exception as e:
+                return back(f"Saved, but this bucket could not be opened: {e}")
+        db.audit(con(), "s3_connected", ip=ip())
+        con().commit()
+        return back("S3 connected. Use s3://bucket/folder as a folder of an album.")
+    if what == "s3_off":
+        sourcecfg.save("s3", {})
+        return back("S3 disconnected.")
+    if what == "dbx_key":
+        key, secret = f.get("app_key", "").strip(), f.get("app_secret", "").strip()
+        if not key or not secret:
+            return back("Enter the Dropbox app key and app secret.")
+        sourcecfg.save("dropbox", {"app_key": key, "app_secret": secret})
+        dropbox_src.reset_token()
+        return back("Saved. Now open the link shown under Dropbox, allow access, and paste the code.")
+    if what == "dbx_code":
+        d = dropbox_src.settings()
+        try:
+            rt = dropbox_src.exchange_code(d.get("app_key", ""), d.get("app_secret", ""), f.get("code", ""))
+        except dropbox_src.DropboxError as e:
+            return back(str(e))
+        sourcecfg.save("dropbox", dict(d, refresh_token=rt))
+        dropbox_src.reset_token()
+        db.audit(con(), "dropbox_connected", ip=ip())
+        con().commit()
+        return back("Dropbox connected. Use dropbox:/Folder as a folder of an album.")
+    if what == "dbx_off":
+        sourcecfg.save("dropbox", {})
+        dropbox_src.reset_token()
+        return back("Dropbox disconnected.")
+    abort(400)
 
 
 @app.post("/admin/google-key")

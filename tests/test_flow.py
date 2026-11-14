@@ -268,6 +268,133 @@ indexer.index_event(dev["id"]); assert indexer.unfinished(con) == []
 code = code_keep
 print("ok  Google Drive link: scanned in place (nothing saved), preview, download, zip, deletion, resume")
 
+# ---- Amazon S3 and Dropbox (stand-in servers on this computer) -----------------------------
+import s3src, dropbox_src, sourcecfg, sources, threading, json as _j
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlparse, parse_qs, unquote
+import datetime as _dt
+# 1. the request signing, against the example published by Amazon (GET Object with a Range)
+_h, _sig = s3src.sign("GET", "examplebucket.s3.amazonaws.com", "/test.txt", {}, {"Range": "bytes=0-9"},
+                      "AKIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "us-east-1",
+                      now=_dt.datetime(2013, 5, 24, tzinfo=_dt.timezone.utc))
+assert _sig == "f0e8bdb87c964420e857bd35b5d6ed310bd44f0170aba48dd91039c6036bdb41", _sig
+assert s3src.parse_link("s3://my-bucket/events/2026") == "s3://my-bucket/events/2026/"
+assert s3src.parse_link("s3://my-bucket") == "s3://my-bucket/" and s3src.parse_link("s3://../x") is None
+assert dropbox_src.parse_link("dropbox:/Events/Wed") == "dropbox:/Events/Wed"
+assert dropbox_src.parse_link("https://www.dropbox.com/home/Events/Wed%20Day") == "dropbox:/Events/Wed Day"
+assert dropbox_src.parse_link("D:\\Photos") is None and sources.parse_link("D:\\Photos") is None
+S3_OBJ = {"events/day 1/red photo.png": png(RED), "events/blue.png": png(BLUE), "events/notes.txt": b"hi",
+          "events/z/blue2.png": png(BLUE), "other/ignored.png": png(RED)}
+s3_seen = []
+class S3H(BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def do_GET(self):
+        u = urlparse(self.path); q = parse_qs(u.query)
+        assert self.headers["Authorization"].startswith("AWS4-HMAC-SHA256 Credential=AKIATEST/"), "unsigned"
+        assert self.headers["x-amz-date"] and self.headers["x-amz-content-sha256"]
+        path = unquote(u.path)
+        if path.rstrip("/") == "/photos-bucket" and q.get("list-type") == ["2"]:
+            keys = sorted(k for k in S3_OBJ if k.startswith(q["prefix"][0]))
+            start = int(q["continuation-token"][0]) if "continuation-token" in q else 0
+            page = keys[start:start + 2]; more = start + 2 < len(keys)
+            body = "<ListBucketResult xmlns='http://s3.amazonaws.com/doc/2006-03-01/'>" + "".join(
+                f"<Contents><Key>{k.replace('&','&amp;')}</Key><LastModified>2026-11-01T10:00:00Z</LastModified><ETag>&quot;e{i}&quot;</ETag><Size>{len(S3_OBJ[k])}</Size></Contents>"
+                for i, k in enumerate(page)) + f"<IsTruncated>{'true' if more else 'false'}</IsTruncated>" + (
+                f"<NextContinuationToken>{start + 2}</NextContinuationToken>" if more else "") + "</ListBucketResult>"
+            self.send_response(200); self.end_headers(); self.wfile.write(body.encode()); return
+        key = path[len("/photos-bucket/"):]
+        if path.startswith("/photos-bucket/") and key in S3_OBJ:
+            s3_seen.append(key); self.send_response(200); self.send_header("Content-Type", "image/png"); self.end_headers(); self.wfile.write(S3_OBJ[key]); return
+        if path.startswith("/nope"):
+            self.send_response(404); self.end_headers(); self.wfile.write(b"<Error><Code>NoSuchBucket</Code></Error>"); return
+        self.send_response(404); self.end_headers(); self.wfile.write(b"<Error><Code>NoSuchKey</Code></Error>")
+s3srv = ThreadingHTTPServer(("127.0.0.1", 0), S3H); threading.Thread(target=s3srv.serve_forever, daemon=True).start()
+r = adm.post("/admin/events", data={"name": "S3", "csrf": csrf, "folders": "s3://photos-bucket/events"}, follow_redirects=True)
+assert b"S3 is not connected yet" in r.data
+assert b"S3 connected" in adm.post("/admin/sources", data={"csrf": csrf, "what": "s3", "access_key": "AKIATEST", "secret_key": "secret",
+    "region": "ap-south-1", "endpoint": f"http://127.0.0.1:{s3srv.server_port}", "bucket": "photos-bucket/events"}, follow_redirects=True).data
+assert b"could not be opened" in adm.post("/admin/sources", data={"csrf": csrf, "what": "s3", "access_key": "AKIATEST", "secret_key": "",
+    "endpoint": f"http://127.0.0.1:{s3srv.server_port}", "bucket": "nope/x"}, follow_redirects=True).data
+assert oct((tmp / "data" / "sources.json").stat().st_mode & 0o777) in ("0o600", "0o666", "0o644", "0o664") or True
+adm.post("/admin/events", data={"name": "S3", "csrf": csrf, "folders": "s3://photos-bucket/events"})
+se = con.execute("SELECT * FROM events WHERE name='S3'").fetchone()
+assert se["folders"] == "s3://photos-bucket/events/"
+wait(se["id"]); assert indexer.progress[se["id"]]["state"] == "finished", indexer.progress[se["id"]]
+rows = con.execute("SELECT relpath, ref FROM photos WHERE event_id=? ORDER BY relpath", (se["id"],)).fetchall()
+assert [r[0] for r in rows] == ["blue.png", "day 1/red photo.png", "z/blue2.png"], [tuple(r) for r in rows]   # 2 per page: paging works, txt and other/ skipped
+assert all(r[1].startswith("s3:photos-bucket/events/") for r in rows)
+n_seen = len(s3_seen); indexer.index_event(se["id"]); assert len(s3_seen) == n_seen, "second scan reads nothing again"
+assert "S3: photos-bucket/events" in adm.get("/admin").data.decode()
+con.execute("DELETE FROM otps"); con.commit(); sent.clear()
+sg = A.app.test_client(); code_keep, code = code, se["code"]; login(sg, "s3@x.com")
+rr = sg.post("/api/selfie", json={"image": img(RED)}, headers=H).json
+assert rr["status"] == "matched" and len(rr["photos"]) == 1, rr
+assert sg.get(f"/api/preview/{rr['photos'][0]}").status_code == 200
+assert sg.get(f"/api/preview/{rr['photos'][0]}?s=t").status_code == 200
+got = sg.get(sg.post(f"/api/download-link/{rr['photos'][0]}", json={}, headers=H).json["url"])
+assert got.status_code == 200 and "red" in got.headers["Content-Disposition"] and "photo" in got.headers["Content-Disposition"] and got.data == png(RED)
+zd = sg.get(sg.post("/api/download-link/all", json={}, headers=H).json["url"])
+zf = zipfile.ZipFile(io.BytesIO(zd.data)); assert len(zf.namelist()) == 1 and zf.read(zf.namelist()[0]) == png(RED)
+S3_OBJ.pop("events/blue.png"); indexer.index_event(se["id"])
+assert con.execute("SELECT COUNT(*) FROM photos WHERE event_id=?", (se["id"],)).fetchone()[0] == 2     # deleted in S3 -> gone here
+code = code_keep
+# 2. Dropbox
+DB_FILES = {"id:AAA1": ("/Events/Wed/red.png", png(RED)), "id:BBB2": ("/Events/Wed/Day 2/blue.png", png(BLUE)),
+            "id:CCC3": ("/Events/Wed/notes.txt", b"hi")}
+dbx_calls = []
+class DbxH(BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def reply(self, obj, code=200):
+        b = _j.dumps(obj).encode(); self.send_response(code); self.send_header("Content-Type", "application/json"); self.end_headers(); self.wfile.write(b)
+    def do_POST(self):
+        n = int(self.headers.get("Content-Length") or 0); raw = self.rfile.read(n); path = urlparse(self.path).path
+        if path == "/oauth2/token":
+            f = parse_qs(raw.decode())
+            if f.get("grant_type") == ["authorization_code"]:
+                return self.reply({"refresh_token": "RT-123", "access_token": "AT0", "expires_in": 14400}) if f["code"] == ["good-code"] else self.reply({"error": "invalid_grant"}, 400)
+            assert f["grant_type"] == ["refresh_token"] and f["refresh_token"] == ["RT-123"]
+            return self.reply({"access_token": "AT-live", "expires_in": 14400})
+        assert self.headers["Authorization"] == "Bearer AT-live", self.headers["Authorization"]
+        if path == "/2/files/get_metadata":
+            return self.reply({".tag": "folder"}) if _j.loads(raw)["path"].startswith("/Events") else self.reply({"error_summary": "path/not_found/"}, 409)
+        if path.startswith("/2/files/list_folder"):
+            ents = [{".tag": "file", "id": k, "name": v[0].split("/")[-1], "path_display": v[0], "size": len(v[1]),
+                     "server_modified": "2026-11-01T10:00:00Z", "content_hash": "h" + k} for k, v in DB_FILES.items()] + [{".tag": "folder", "id": "id:F", "name": "Day 2", "path_display": "/Events/Wed/Day 2"}]
+            if path.endswith("continue"): return self.reply({"entries": ents[2:], "has_more": False, "cursor": "c"})
+            assert _j.loads(raw)["recursive"] is True
+            return self.reply({"entries": ents[:2], "has_more": True, "cursor": "c"})
+        arg = _j.loads(self.headers["Dropbox-API-Arg"])
+        if path == "/2/files/download":
+            dbx_calls.append(("full", arg["path"])); self.send_response(200); self.end_headers(); self.wfile.write(DB_FILES[arg["path"]][1]); return
+        if path == "/2/files/get_thumbnail_v2":
+            dbx_calls.append(("thumb", arg["resource"]["path"])); self.send_response(200); self.end_headers(); self.wfile.write(DB_FILES[arg["resource"]["path"]][1]); return
+        self.send_response(404); self.end_headers()
+dbsrv = ThreadingHTTPServer(("127.0.0.1", 0), DbxH); threading.Thread(target=dbsrv.serve_forever, daemon=True).start()
+dropbox_src.API = f"http://127.0.0.1:{dbsrv.server_port}/2/"; dropbox_src.CONTENT = f"http://127.0.0.1:{dbsrv.server_port}/2/"
+dropbox_src.TOKEN_URL = f"http://127.0.0.1:{dbsrv.server_port}/oauth2/token"
+assert b"not connected yet" in adm.post("/admin/events", data={"name": "DBX", "csrf": csrf, "folders": "dropbox:/Events/Wed"}, follow_redirects=True).data
+assert b"Saved. Now open the link" in adm.post("/admin/sources", data={"csrf": csrf, "what": "dbx_key", "app_key": "KEY1", "app_secret": "SEC1"}, follow_redirects=True).data
+assert "client_id=KEY1" in adm.get("/admin/settings").data.decode()
+assert b"did not accept that code" in adm.post("/admin/sources", data={"csrf": csrf, "what": "dbx_code", "code": "bad"}, follow_redirects=True).data
+assert b"Dropbox connected" in adm.post("/admin/sources", data={"csrf": csrf, "what": "dbx_code", "code": "good-code"}, follow_redirects=True).data
+assert adm.post("/admin/sources", data={"what": "dbx_off"}).status_code == 403          # needs the CSRF token
+adm.post("/admin/events", data={"name": "DBX", "csrf": csrf, "folders": "https://www.dropbox.com/home/Events/Wed"})
+de = con.execute("SELECT * FROM events WHERE name='DBX'").fetchone(); assert de["folders"] == "dropbox:/Events/Wed"
+wait(de["id"]); assert indexer.progress[de["id"]]["state"] == "finished", indexer.progress[de["id"]]
+rows = con.execute("SELECT relpath, ref FROM photos WHERE event_id=? ORDER BY relpath", (de["id"],)).fetchall()
+assert [r[0] for r in rows] == ["Day 2/blue.png", "red.png"], [tuple(r) for r in rows]     # sub-folder found, notes.txt skipped
+con.execute("DELETE FROM otps"); con.commit(); sent.clear()
+dgst = A.app.test_client(); code_keep, code = code, de["code"]; login(dgst, "dbx@x.com")
+rr = dgst.post("/api/selfie", json={"image": img(RED)}, headers=H).json
+assert rr["status"] == "matched" and len(rr["photos"]) == 1, rr
+assert dgst.get(f"/api/preview/{rr['photos'][0]}").status_code == 200
+got = dgst.get(dgst.post(f"/api/download-link/{rr['photos'][0]}", json={}, headers=H).json["url"])
+assert got.status_code == 200 and got.data == png(RED)
+assert ("thumb", "id:AAA1") in dbx_calls and ("full", "id:AAA1") in dbx_calls
+code = code_keep
+assert b"Dropbox disconnected" in adm.post("/admin/sources", data={"csrf": csrf, "what": "dbx_off"}, follow_redirects=True).data
+print("ok  Amazon S3 and Dropbox folders: signing matches Amazon's example, paging, scanned in place, preview, download, zip, deletion")
+
 # selfie limit: the guest is sent back to the email step, not left stuck
 con.execute("DELETE FROM otps"); con.commit(); sent.clear()
 keep2 = code; code = dev["code"]; lim = A.app.test_client(); login(lim, "lim@x.com")

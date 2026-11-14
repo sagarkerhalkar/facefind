@@ -122,6 +122,24 @@ If a drive is switched off, its photos stay in the index and work again when
 it is back. Photos never leave your drives; originals are read only at the
 moment a verified guest downloads them.
 
+## Amazon S3 and Dropbox folders
+
+Photos can stay in **Amazon S3** (also Cloudflare R2, Backblaze B2, Wasabi, MinIO) or **Dropbox**.
+They are scanned where they are; only the face signatures and small previews are kept here.
+
+- **S3:** Admin, Settings, *Amazon S3*. Enter an access key that can only read
+  (`s3:ListBucket`, `s3:GetObject`), the region and, for R2/B2/MinIO, the endpoint.
+  Then use `s3://bucket/folder` as an album folder. Scanning reads each original, so run the
+  app in the same region as the bucket (or on a fast line) for speed.
+- **Dropbox:** Admin, Settings, *Dropbox*. Create an app at dropbox.com/developers/apps
+  (Scoped access, permissions `files.metadata.read` and `files.content.read`), enter its key and
+  secret, open the link shown, press Allow and paste the code. Then use `dropbox:/Folder`
+  (or paste the address from dropbox.com) as an album folder. Dropbox makes the 2048-pixel
+  scan copy itself, so scanning is quick.
+- The settings are kept in `data/sources.json` (or the `S3_ACCESS_KEY`, `S3_SECRET_KEY`,
+  `S3_REGION`, `S3_ENDPOINT`, `DROPBOX_APP_KEY`, `DROPBOX_APP_SECRET`, `DROPBOX_REFRESH_TOKEN`
+  environment variables). Keep that file private.
+
 ## Google Drive links
 
 You can paste a Google Drive **folder link** instead of choosing a folder.
