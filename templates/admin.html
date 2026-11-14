@@ -98,6 +98,9 @@
   <form class="inline" method="post" action="{{ url_for('admin_event_action', eid=e.id, action='rescan') }}">{{ keep }}<button class="small ghost">Scan every photo again</button></form>
   <form class="inline" method="post" action="{{ url_for('admin_event_action', eid=e.id, action='toggle') }}">{{ keep }}<button class="small ghost">{{ "Close link" if e.active else "Open link" }}</button></form>
   <form class="inline" method="post" action="{{ url_for('admin_event_action', eid=e.id, action='approval') }}">{{ keep }}<button class="small ghost">Ask me before giving photos: {{ "ON" if e.require_approval else "OFF" }}</button></form>
+  <details class="danger-zone"><summary>Delete this album</summary>
+  <p class="hint">Removes the album, its photo list and saved faces from this app. Your original photos on the drives and Google Drive are not touched. The download report is kept.</p>
+  <form method="post" action="{{ url_for('admin_event_action', eid=e.id, action='delete') }}">{{ keep }}<button class="small danger">Yes, delete this album</button></form></details>
   {% if e.n_errors %}<details><summary>Files that were not scanned ({{ e.n_errors }})</summary>
   <p class="hint">These files could not be opened. Everything else in the album was scanned.</p>
   <div class="scroll"><table><tr><th>File</th><th>Reason</th></tr>

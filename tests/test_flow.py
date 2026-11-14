@@ -1,5 +1,6 @@
 """End-to-end check of the security rules with a stand-in face engine
 (colour = person). Run:  python tests/test_flow.py"""
+import sqlite3
 import base64, io, os, sys, tempfile, time
 from pathlib import Path
 
@@ -613,4 +614,60 @@ assert cert.exists() and netutil.ensure_cert(tmp / "tls", ["photos.lan"])[0].sta
 import socket; busy = socket.socket(); busy.bind(("127.0.0.1", 0)); bp = busy.getsockname()[1]
 assert netutil.free_port("127.0.0.1", bp) != bp; busy.close()
 print("ok  VLAN allow-list, admin VLAN, certificate, busy-port fallback")
-print("ok  path escape blocked, sign-out erases, closed link is dead\nALL TESTS PASSED")
+print("ok  path escape blocked, sign-out erases, closed link is dead")
+
+
+# ---- a crash is logged with a reference, and the visitor sees a friendly page
+_A = A
+_orig_home = _A.guest_page
+def _boom(*a, **k):
+    raise RuntimeError("test crash")
+_A.guest_page = _boom
+_c = _A.app.test_client()
+_r = _c.get("/")
+assert _r.status_code == 500 and b"Reference" in _r.data and b"Traceback" not in _r.data
+_j = _c.post("/api/otp/send", json={}, headers={"X-Requested-With": "facefind"})
+assert _j.status_code != 200
+_A.guest_page = _orig_home
+_log = (config.DATA_DIR / "error.log").read_text(encoding="utf-8")
+assert "test crash" in _log and "ref " in _log
+print("ok crash page")
+
+# an old album can be deleted; the report of downloads stays
+import db as _db
+_c = _db.connect()
+_n0 = _c.execute("SELECT COUNT(*) FROM photos WHERE event_id=?", (ev["id"],)).fetchone()[0]
+assert _n0 > 0
+_dl0 = _c.execute("SELECT COUNT(*) FROM downloads").fetchone()[0]
+assert adm.post(f"/admin/events/{ev['id']}/delete").status_code == 403          # needs the admin form token
+_r = adm.post(f"/admin/events/{ev['id']}/delete", data={"csrf": csrf}, follow_redirects=True)
+assert b"deleted" in _r.data
+for _t in ("events", "photos", "faces"):
+    assert _c.execute(f"SELECT COUNT(*) FROM {_t} WHERE " + ("id" if _t == "events" else "event_id") + "=?", (ev["id"],)).fetchone()[0] == 0, _t
+assert _c.execute("SELECT COUNT(*) FROM downloads").fetchone()[0] == _dl0
+assert adm.get("/admin").status_code == 200
+_c.close()
+print("ok  an old album can be deleted, downloads report kept")
+
+# a damaged database repairs itself instead of stopping the app (own file, so
+# Windows' open handles on the live database cannot get in the way)
+import db
+_live = config.DB_PATH
+config.DB_PATH = config.DATA_DIR / "repair-test.db"
+try:
+    db.init()
+    _con = db.connect(); _con.execute("INSERT OR REPLACE INTO kv(k,v) VALUES('repair-test','kept')"); _con.commit(); _con.close()
+    _con = sqlite3.connect(config.DB_PATH); _con.execute("PRAGMA wal_checkpoint(TRUNCATE)"); _con.close()
+    with open(config.DB_PATH, "r+b") as _f:         # wreck the start of the file
+        _f.seek(0); _f.write(b"\x00garbage" * 800)
+    for _x in ("-wal", "-shm"):
+        try: config.DB_PATH.with_name(config.DB_PATH.name + _x).unlink()
+        except OSError: pass
+    db.init()                                       # must not raise
+    _con = db.connect(); assert _con.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+    _con.execute("SELECT count(*) FROM events"); _con.close()
+    assert list((config.DATA_DIR / "broken-db").glob("*/repair-test.db"))
+finally:
+    config.DB_PATH = _live
+print("ok  damaged database is kept aside, rebuilt, and the app starts")
+print("ALL TESTS PASSED")

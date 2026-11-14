@@ -85,6 +85,43 @@ def err(msg, status=400):
     return jsonify(ok=False, error=msg), status
 
 
+import logging
+from logging.handlers import RotatingFileHandler
+
+_elog = logging.getLogger("facefind")
+try:
+    _h = RotatingFileHandler(config.DATA_DIR / "error.log", maxBytes=2_000_000,
+                             backupCount=3, encoding="utf-8")
+    _h.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
+    _elog.addHandler(_h)
+except OSError:
+    pass
+_elog.setLevel(logging.INFO)
+
+
+@app.errorhandler(Exception)
+def _crash(e):
+    """Never show a bare 'Internal Server Error': write the real reason to
+    data/error.log (and the console) and give the visitor a reference."""
+    if isinstance(e, HTTPException):
+        return e
+    import traceback
+    ref = secrets.token_hex(3)
+    _elog.error("ref %s  %s %s\n%s", ref, request.method, request.full_path,
+                traceback.format_exc())
+    if request.path.startswith("/api/"):
+        return jsonify(ok=False, error=f"Something went wrong on our side (ref {ref}). "
+                                       "Please try again."), 500
+    return ("<!doctype html><meta name=viewport content='width=device-width'>"
+            "<body style='font-family:system-ui;background:#0b0f1a;color:#e8ecf7;"
+            "display:grid;place-items:center;min-height:100vh;margin:0'>"
+            "<div style='max-width:420px;padding:24px;text-align:center'>"
+            "<h2>Something went wrong</h2><p>The page could not load. "
+            "Please reload in a moment.</p>"
+            f"<p style='opacity:.6'>Reference {ref}</p>"
+            "<p><a style='color:#8ab4ff' href='/'>Reload</a></p></div>", 500)
+
+
 @app.before_request
 def _network_guard():
     # Only the networks / VLANs you list may reach the app; the admin page
@@ -1562,6 +1599,31 @@ def admin_google_key():
                                          + d["client_email"] + " and paste their links."))
 
 
+def _delete_album(c, eid):
+    """Removes an old album from this app: its photo list, faces, saved photos,
+    small copies. The original photos on the drives are never touched. The
+    record of who downloaded what stays, so the report is still complete."""
+    ev = c.execute("SELECT name FROM events WHERE id=?", (eid,)).fetchone()
+    if not ev:
+        return "That album was already removed."
+    if indexer.progress.get(eid, {}).get("state") == "running":
+        return "A scan is running for this album. Delete it when the scan has finished."
+    while True:
+        ids = [r[0] for r in c.execute("SELECT id FROM photos WHERE event_id=? LIMIT 2000", (eid,))]
+        if not ids:
+            break
+        for pid in ids:
+            indexer._forget_photo(c, pid)
+        c.commit()
+    for sql in ("DELETE FROM faces WHERE event_id=?", "DELETE FROM scan_errors WHERE event_id=?",
+                "DELETE FROM otps WHERE event_id=?", "DELETE FROM events WHERE id=?"):
+        c.execute(sql, (eid,))
+    db.kv_set(c, f"scanning:{eid}", None)
+    indexer.progress.pop(eid, None)
+    db.audit(c, "album_deleted", event_id=eid, detail=ev["name"], ip=ip())
+    return f"Album \"{ev['name']}\" deleted. Your original photos were not touched."
+
+
 @app.post("/admin/events/<int:eid>/<action>")
 def admin_event_action(eid, action):
     if not admin_post_ok():
@@ -1603,6 +1665,8 @@ def admin_event_action(eid, action):
         c.execute("UPDATE events SET active=1-active WHERE id=?", (eid,))
     elif action == "approval":
         c.execute("UPDATE events SET require_approval=1-require_approval WHERE id=?", (eid,))
+    elif action == "delete":
+        msg = _delete_album(c, eid)
     else:
         abort(404)
     c.commit()

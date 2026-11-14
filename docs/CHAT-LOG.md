@@ -221,6 +221,18 @@ search, and browsers may keep previews for an hour.
 
 ---
 
+## 14 November, 11:09
+
+**You:** (screenshot: facefind.sagarkerhalkar.com shows "Internal Server Error") "why thi error come" and the start-up output ending in `sqlite3.DatabaseError: database disk image is malformed`.
+
+**Reply (short):** The database file `data\facefind.db` was damaged (usually a power cut, a forced close, or the file copied/synced while the app ran), so the app could not start and the website showed the error. The app now repairs itself at start-up: it keeps the broken files in `data\broken-db\`, builds a new database and copies across every record it can still read.
+
+**You (same message):** "i can able to delet the dold event allso that importent"
+
+**Reply (short):** Added a "Delete this album" button on every album. It removes the album, its photo list, faces and small copies from the app only; the original photos on the drives and Google Drive are never touched, and the download report is kept.
+
+---
+
 ## Still open
 
 - Wrong person in selfie results. Waiting for two answers from the owner:

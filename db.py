@@ -62,7 +62,83 @@ def connect():
     return con
 
 
+def _healthy():
+    """True when the database opens and passes SQLite's own check (or is new)."""
+    if not config.DB_PATH.exists():
+        return True
+    try:
+        con = sqlite3.connect(config.DB_PATH, timeout=30)
+        try:
+            con.execute("PRAGMA journal_mode=WAL")
+            return con.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+        finally:
+            con.close()
+    except sqlite3.DatabaseError:
+        return False
+
+
+def repair():
+    """A damaged data/facefind.db (power cut, drive full, copied while the app
+    was running, cloud-sync folder) used to stop the whole app. Now: keep the
+    broken files in data/broken-db/, build a fresh database and copy across every
+    row that can still be read, then carry on. Returns a message or None."""
+    if _healthy():
+        return None
+    import shutil
+    keep = config.DATA_DIR / "broken-db" / time.strftime("%Y%m%d-%H%M%S")
+    keep.mkdir(parents=True, exist_ok=True)
+    for suffix in ("", "-wal", "-shm"):
+        f = config.DB_PATH.with_name(config.DB_PATH.name + suffix)
+        if f.exists():
+            shutil.copy2(f, keep / f.name)
+    old = keep / config.DB_PATH.name
+    for suffix in ("", "-wal", "-shm"):
+        try:
+            config.DB_PATH.with_name(config.DB_PATH.name + suffix).unlink()
+        except OSError:
+            pass
+    new = sqlite3.connect(config.DB_PATH, timeout=30)
+    new.executescript(SCHEMA)
+    saved = lost = 0
+    try:
+        src = sqlite3.connect(f"file:{old}?mode=ro", uri=True)
+        tables = [r[0] for r in src.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")]
+    except sqlite3.DatabaseError:
+        src, tables = None, []
+    for t in tables:
+        try:
+            have = {r[1] for r in new.execute(f"PRAGMA table_info({t})")}
+            if not have:
+                continue
+            cur = src.execute(f"SELECT * FROM {t}")
+            cols = [d[0] for d in cur.description if d[0] in have]
+            idx = [i for i, d in enumerate(cur.description) if d[0] in have]
+            q = f"INSERT OR IGNORE INTO {t}({','.join(cols)}) VALUES({','.join('?' * len(cols))})"
+            while True:
+                try:
+                    row = cur.fetchone()
+                except sqlite3.DatabaseError:
+                    lost += 1
+                    break
+                if row is None:
+                    break
+                new.execute(q, [row[i] for i in idx])
+                saved += 1
+        except sqlite3.DatabaseError:
+            lost += 1
+    new.commit()
+    new.close()
+    if src:
+        src.close()
+    msg = (f"The database was damaged. Kept a copy in {keep}; rebuilt it and "
+           f"recovered {saved} records ({lost} table(s) cut short).")
+    print("WARNING:", msg, flush=True)
+    return msg
+
+
 def init():
+    repair()
     con = connect()
     con.executescript(SCHEMA)
     # Added later: where a Google Drive photo lives (its file id) and the
