@@ -28,6 +28,7 @@ from flask import (Flask, abort, g, jsonify, redirect, render_template,
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
+import autoalbums
 import brand
 import config
 import db
@@ -419,7 +420,8 @@ def brand_theme():
     css = f":root{{--accent:{accent};--accent-ink:{_ink_for(accent)};}}\n"
     if brand.BACKGROUND.exists():
         url = f"url(/brand/background?v={brand.version()})"
-        css += (f".backdrop{{background-image:{url};}}\n"
+        veil = "linear-gradient(rgba(250,248,245,.90),rgba(250,248,245,.94))"
+        css += (f".backdrop{{background-image:{veil},{url};}}\n"
                 f".login-wrap{{background-image:linear-gradient(rgba(13,11,26,.72),rgba(13,11,26,.72)),{url};"
                 "background-size:cover;background-position:center;}}\n")
     return app.response_class(css, mimetype="text/css")
@@ -1461,6 +1463,7 @@ def admin_settings_page():
     return admin_page("settings", reported=reported, look_first=brand.get(c, "look_first") == "1",
                       threshold=f"{config.MATCH_THRESHOLD:.2f}",
                       scan_side=config.SCAN_SIDE, drive_email=gdrive.robot_email(),
+                      auto=autoalbums.settings(c), auto_state=autoalbums.state,
                       log=c.execute("SELECT * FROM audit ORDER BY id DESC LIMIT 200").fetchall())
 
 
@@ -1727,6 +1730,28 @@ def admin_settings():
         brand.put(c, "look_first", "1" if request.form.get("look_first") else "0")
         c.commit()
         return back("Saved.")
+    if request.form.get("what") == "auto":
+        roots, bad = [], []
+        for line in db.split_folders(request.form.get("roots", "")):
+            e = autoalbums.add_root(line)
+            (roots if e else bad).append(e or line)
+        try:
+            mins = max(1, min(240, int(request.form.get("minutes", "3"))))
+        except ValueError:
+            mins = 3
+        on = bool(request.form.get("on")) and bool(roots)
+        db.kv_set(c, "auto:on", "1" if on else "0")
+        db.kv_set(c, "auto:roots", "\n".join(roots))
+        db.kv_set(c, "auto:minutes", str(mins))
+        db.audit(c, "auto_albums_saved", detail=f"{'on' if on else 'off'} | {len(roots)} folders | by {who()}", ip=ip())
+        c.commit()
+        made = autoalbums.run_once() if on and request.form.get("now") else 0
+        msg = ("Automatic albums are ON." if on else "Automatic albums are OFF.")
+        if made:
+            msg += f" {made} new album{'s' if made != 1 else ''} created and being scanned."
+        if bad:
+            msg += " Not found: " + " | ".join(bad)
+        return back(msg)
     side = request.form.get("scan_side", "")
     if side:
         if side not in ("1280", "1600", "2000"):
@@ -1858,9 +1883,10 @@ def _delete_album(c, eid):
     """Removes an old album from this app: its photo list, faces, saved photos,
     small copies. The original photos on the drives are never touched. The
     record of who downloaded what stays, so the report is still complete."""
-    ev = c.execute("SELECT name FROM events WHERE id=?", (eid,)).fetchone()
+    ev = c.execute("SELECT name, folders FROM events WHERE id=?", (eid,)).fetchone()
     if not ev:
         return "That album was already removed."
+    folders = ev["folders"]
     if indexer.progress.get(eid, {}).get("state") == "running":
         return "A scan is running for this album. Delete it when the scan has finished."
     while True:
@@ -1874,6 +1900,10 @@ def _delete_album(c, eid):
                 "DELETE FROM otps WHERE event_id=?", "DELETE FROM events WHERE id=?"):
         c.execute(sql, (eid,))
     db.kv_set(c, f"scanning:{eid}", None)
+    if db.kv_get(c, f"autoev:{eid}"):          # a deleted automatic album must not come back
+        for entry in db.split_folders(folders):
+            db.kv_set(c, "auto:skip:" + entry, "1")
+        db.kv_set(c, f"autoev:{eid}", None)
     indexer.progress.pop(eid, None)
     indexer._drop_cache(eid)
     db.audit(c, "album_deleted", event_id=eid, detail=ev["name"], ip=ip())
@@ -2079,6 +2109,7 @@ def startup_checks():
 
 def main():
     startup_checks()
+    autoalbums.start()                      # new sub-folders become albums by themselves
     indexer.warm_all()                      # every open album in memory before the first guest
     host = config.HOST
     try:                                    # one fixed port, remembered in data/port.txt

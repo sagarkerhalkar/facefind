@@ -728,4 +728,30 @@ for _i in range(50):
 for _u in (f"http://127.0.0.1:{_pt}/x", f"https://127.0.0.1:{_pt}/x", f"http://localhost:{_pt}/x", f"https://localhost:{_pt}/x"):
     assert urllib.request.urlopen(_u, timeout=5, context=_ctx).read() == b"pong", _u
 print("ok  one port answers http and https on 127.0.0.1 and localhost")
+# ---- automatic albums: a new sub-folder becomes an album, a deleted one stays gone
+import autoalbums
+assert autoalbums.date_from_name("08-11-2026 Sharma Wedding") == "2026-11-08"
+assert autoalbums.date_from_name("2026_10_20 Annual Day") == "2026-10-20" and autoalbums.date_from_name("Misc") == ""
+parent = tmp / "events_parent"; (parent / "Diwali 01-11-2026").mkdir(parents=True); (parent / "Empty one").mkdir()
+img(RED, parent / "Diwali 01-11-2026" / "a.png")
+r = adm.post("/admin/settings", data={"csrf": csrf, "what": "auto", "on": "1", "roots": str(parent), "minutes": "3", "now": "1"}, follow_redirects=True)
+assert b"Automatic albums are ON" in r.data and b"1 new album" in r.data, r.data[:400]
+ac = db.connect()
+auto_ev = ac.execute("SELECT * FROM events WHERE name='Diwali 01-11-2026'").fetchone()
+assert auto_ev and auto_ev["event_date"] == "2026-11-01" and not ac.execute("SELECT 1 FROM events WHERE name='Empty one'").fetchone()
+assert autoalbums.run_once() == 0                               # nothing new: no duplicate album
+for _i in range(100):
+    if indexer.progress.get(auto_ev["id"], {}).get("state") != "running": break
+    time.sleep(0.1)
+img(RED, parent / "Diwali 01-11-2026" / "b.png"); (parent / "Garba").mkdir(); img(RED, parent / "Garba" / "g.png")
+assert autoalbums.run_once() == 1 and ac.execute("SELECT 1 FROM events WHERE name='Garba'").fetchone()
+g_id = ac.execute("SELECT id FROM events WHERE name='Garba'").fetchone()[0]
+for _i in range(100):
+    if indexer.progress.get(g_id, {}).get("state") != "running": break
+    time.sleep(0.1)
+adm.post(f"/admin/events/{g_id}/delete", data={"csrf": csrf})
+assert autoalbums.run_once() == 0 and not ac.execute("SELECT 1 FROM events WHERE name='Garba'").fetchone()
+assert b"Automatic albums" in adm.get("/admin/settings").data
+ac.close()
+print("ok  automatic albums: new folder becomes an album, no duplicates, deleted stays deleted")
 print("ALL TESTS PASSED")

@@ -156,6 +156,7 @@ button.working::after { content:""; width:1em; height:1em; border:2px solid curr
 .foot { text-align:center; font-size:.82rem; color:var(--soft); padding:0 16px 28px; margin:0; }
 
 /* after sign-in the pitch folds away */
+body.in .backdrop { background:radial-gradient(1000px 600px at 90% -10%, color-mix(in srgb,var(--accent) 16%,transparent), transparent 62%), radial-gradient(800px 600px at -10% 40%, rgba(99,102,241,.09), transparent 60%), linear-gradient(180deg,#fbf9f6,#f3efe9); }
 body.in .stage { display:block; min-height:0; max-width:1500px; padding-top:20px; }
 body.in .pitch, body.in .how { display:none; }
 body.in .panel > .msg { max-width:600px; margin-left:auto; margin-right:auto; }

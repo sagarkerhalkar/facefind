@@ -29,6 +29,18 @@
 <p class="hint">With this on, anyone who has the link can see previews of a person by uploading that person's picture. Turn it off for private events.</p>
 <button type="submit">Save</button></form>
 
+<form class="card" method="post" action="{{ url_for('admin_settings') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="what" value="auto">
+<h2>Automatic albums</h2>
+<p class="hint">Name the folder that holds all your events. Every folder inside it becomes an album by itself, with the folder name as the event name and the date taken from the name (or the folder's date). Photos added later are found automatically. Your original photos are never touched.</p>
+<label class="check"><input type="checkbox" name="on" {{ 'checked' if auto.on }}><span>Create albums automatically</span></label>
+<label for="auto-roots">Parent folders (one per line: a folder on this computer or a Google Drive folder link)</label>
+<textarea id="auto-roots" name="roots" rows="3" placeholder="D:\Photos\Events">{{ auto.roots|join('\n')|replace('gdrive:', 'https://drive.google.com/drive/folders/') }}</textarea>
+<label for="auto-min">Check for new folders every (minutes)</label>
+<input id="auto-min" name="minutes" type="number" min="1" max="240" value="{{ auto.minutes }}">
+{% if auto.on %}<p class="hint">{% if auto_state.last_ts %}Last check: {{ 'running now' if auto_state.running else 'done' }}. Albums created since start: {{ auto_state.made }}.{% else %}The first check runs within a minute of the app starting.{% endif %}</p>{% endif %}
+{% if auto_state.error %}<p class="note">{{ auto_state.error }}</p>{% endif %}
+<button type="submit">Save</button> <button type="submit" name="now" value="1" class="ghost">Save and check now</button></form>
+
 <form class="card" method="post" action="{{ url_for('admin_settings') }}"><input type="hidden" name="csrf" value="{{ csrf }}">
 <h2>Match strictness</h2>
 <label for="threshold">How alike two faces must be (0.30 to 0.80)</label>
