@@ -670,4 +670,24 @@ try:
 finally:
     config.DB_PATH = _live
 print("ok  damaged database is kept aside, rebuilt, and the app starts")
+# a database that breaks while running restarts the app so it is repaired; two copies are refused
+import sqlite3 as _sq, netutil
+assert db.is_damage(_sq.DatabaseError("database disk image is malformed"))
+assert not db.is_damage(_sq.OperationalError("database is locked")) and not db.is_damage(ValueError("x"))
+_seen = []
+_real = db.restart_to_repair
+db.restart_to_repair = lambda why="": _seen.append(why)
+def _bad(*a, **k):
+    raise _sq.DatabaseError("database disk image is malformed")
+_A.guest_page = _bad
+assert _A.app.test_client().get("/").status_code == 500 and _seen
+_A.guest_page = _orig_home
+db.restart_to_repair = _real
+_lk = config.DATA_DIR / "t.lock"
+netutil.single_instance(_lk)
+import subprocess, sys
+_r = subprocess.run([sys.executable, "-c", "import netutil,sys;from pathlib import Path;netutil.single_instance(Path(sys.argv[1]))", str(_lk)],
+                    capture_output=True, text=True)
+assert _r.returncode != 0 and "already running" in _r.stderr
+print("ok  broken database restarts the app to repair; a second copy is refused")
 print("ALL TESTS PASSED")

@@ -46,6 +46,11 @@ if config.TRUST_PROXY:
     from werkzeug.middleware.proxy_fix import ProxyFix
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
+if __name__ == "__main__":
+    try:                                    # two copies on one database damage it
+        netutil.single_instance(config.DATA_DIR / "app.lock")
+    except RuntimeError as e:
+        raise SystemExit(f"\n  {e}\n")
 db.init()
 
 
@@ -107,6 +112,8 @@ def _crash(e):
         return e
     import traceback
     ref = secrets.token_hex(3)
+    if db.is_damage(e):
+        db.restart_to_repair(str(e))
     _elog.error("ref %s  %s %s\n%s", ref, request.method, request.full_path,
                 traceback.format_exc())
     if request.path.startswith("/api/"):

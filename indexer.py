@@ -298,6 +298,8 @@ def index_event(event_id):
         st["took"] = time.time() - st["started"]
         st["state"] = "finished"
     except Exception as e:
+        if db.is_damage(e):
+            db.restart_to_repair(str(e))
         st.update(state="failed", error=str(e), phase="")
     finally:
         con.close()
