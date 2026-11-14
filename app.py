@@ -133,6 +133,23 @@ def _crash(e):
 
 
 @app.before_request
+def _clock():
+    g.t0 = time.time()
+
+
+@app.after_request
+def _slow_log(r):
+    """Anything slower than a second is written to data/error.log with its time,
+    so 'the app is slow' can be traced to the exact page."""
+    t0 = g.get("t0")
+    if t0 and not request.path.startswith(("/static", "/brand")):
+        dt = time.time() - t0
+        if dt > 1.0:
+            _elog.warning("slow %.1fs  %s %s  -> %s", dt, request.method, request.path, r.status_code)
+    return r
+
+
+@app.before_request
 def _guests_first():
     # While guests are using the site the scan slows down a little, so pages
     # and photos stay quick (see indexer._embed_file).
@@ -1638,6 +1655,7 @@ def _delete_album(c, eid):
         c.execute(sql, (eid,))
     db.kv_set(c, f"scanning:{eid}", None)
     indexer.progress.pop(eid, None)
+    indexer._drop_cache(eid)
     db.audit(c, "album_deleted", event_id=eid, detail=ev["name"], ip=ip())
     return f"Album \"{ev['name']}\" deleted. Your original photos were not touched."
 
@@ -1815,6 +1833,29 @@ def _open_browser(url):
     threading.Timer(2.0, lambda: webbrowser.open(url)).start()
 
 
+def disk_check():
+    """How long one safe 'save to disk' takes where data\\ lives. A slow disk
+    (network share, USB drive, synced folder) makes every page slow."""
+    f = config.DATA_DIR / "disk-test.tmp"
+    try:
+        t = time.time()
+        for _ in range(5):
+            with open(f, "wb") as fh:
+                fh.write(os.urandom(4096))
+                fh.flush()
+                os.fsync(fh.fileno())
+        ms = (time.time() - t) / 5 * 1000
+        f.unlink(missing_ok=True)
+    except OSError:
+        return
+    if ms > 40:
+        print(f"!! The disk holding '{config.DATA_DIR}' is SLOW ({ms:.0f} ms per save; a normal "
+              "SSD takes under 5 ms). Every page will feel slow. Move it to a local SSD: "
+              "set DATA_DIR=C:\\facefind-data in .env and copy the data folder there.\n")
+    else:
+        print(f"Disk speed: OK ({ms:.0f} ms per save)")
+
+
 def startup_checks():
     """Runs when the app starts: is the face engine alive, and does any album
     still need its first scan (for example after a failed one)?"""
@@ -1824,8 +1865,10 @@ def startup_checks():
     except Exception as e:
         print(f"\n!! Face engine is NOT working: {e}\n!! Close this window and run start.bat again.\n")
         return
+    disk_check()
     c = db.connect()
     try:
+        indexer.warm([r["id"] for r in c.execute("SELECT id FROM events WHERE active=1")])
         cut_off = indexer.unfinished(c)
         for e in c.execute("SELECT id, name FROM events WHERE active=1").fetchall():
             n = c.execute("SELECT COUNT(*) FROM photos WHERE event_id=?", (e["id"],)).fetchone()[0]

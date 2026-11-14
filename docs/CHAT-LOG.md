@@ -249,6 +249,14 @@ search, and browsers may keep previews for an hour.
 
 ---
 
+## 14 November, 12:01 - 12:13
+
+**You:** the tunnel does not work (app on `https://127.0.0.1:8787`, Cloudflare uses `https://localhost:8787`); curl on the PC gives 200 for https/http/localhost; the web address shows Cloudflare 502; then "app is too slow in all way loading, selfie catching, photo loading everything why and still bug on database, face loading, everywhere".
+
+**Reply (short):** 502 = tunnel connected but the secure link to the app fails; use Type HTTP, URL `127.0.0.1:8787` in the tunnel's Public hostname and `TRUST_PROXY=1` in `.env`. Slowness: found a real cause - during every scan the in-memory face index was thrown away after each batch, so any guest selfie during a scan re-read every face of the album from the database (about 3 s per 300,000 faces, far more for lakhs of photos). Now the index is loaded once, grows by itself as the scan adds faces, is built 7x faster, and is loaded in the background at start-up and after each scan. Added: slow-request log (anything over 1 s goes to `data/error.log` with its page), and a start-up disk speed check that warns when the disk holding `data` is slow.
+
+---
+
 ## Still open
 
 - Wrong person in selfie results. Waiting for two answers from the owner:

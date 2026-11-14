@@ -671,6 +671,22 @@ try:
 finally:
     config.DB_PATH = _live
 print("ok  damaged database is kept aside, rebuilt, and the app starts")
+# the in-memory face index grows by itself while a scan adds faces (no full reload)
+import numpy as _np, indexer as _ix
+_c = db.connect()
+def _add(n, start):
+    for i in range(n):
+        _c.execute("INSERT INTO faces(photo_id,event_id,embedding,size) VALUES(?,?,?,?)",
+                   (start + i, 9999, _np.random.rand(128).astype(_np.float32).tobytes(), "80"))
+    _c.commit()
+_add(5, 100); _m, _i, _s = _ix._matrix(_c, 9999); assert len(_i) == 5 and _m.shape == (5, 128)
+_cached = _ix._cache[9999]
+_add(3, 200); _m, _i, _s = _ix._matrix(_c, 9999); assert len(_i) == 8 and _m.shape == (8, 128) and list(_i[-3:]) == [200, 201, 202]
+_c.execute("DELETE FROM faces WHERE photo_id=100"); _c.commit(); _ix._drop_cache(9999)
+assert len(_ix._matrix(_c, 9999)[1]) == 7
+_c.execute("DELETE FROM faces WHERE event_id=9999"); _c.commit(); _ix._drop_cache(9999); _c.close()
+print("ok  face index grows as the scan adds faces, no full reload")
+
 # one port answers both http:// and https://, by 127.0.0.1 and by localhost
 import socket, ssl, threading, urllib.request, netutil
 from flask import Flask as _F

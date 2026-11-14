@@ -291,7 +291,6 @@ def index_event(event_id):
                     job["thumb"] = None
                 if todo:
                     con.commit()                # guests can already find these photos
-                    _drop_cache(event_id)
         # Remove from the index: photos deleted from a source that was read
         # completely, and photos of sources taken off the album's list.
         for (root, rel), (pid, _, _) in known.items():
@@ -317,7 +316,8 @@ def index_event(event_id):
         st.update(state="failed", error=str(e), phase="")
     finally:
         con.close()
-        _drop_cache(event_id)
+        _drop_cache(event_id)               # removed / replaced photos leave the memory copy
+        warm([event_id])
 
 
 def timing(st):
@@ -348,22 +348,52 @@ def start_index(event_id):
     return True
 
 
+def _arrays(rows, dim=None):
+    """Face rows (id, photo_id, embedding, size) -> (signatures, photo ids, widths, last id)."""
+    if not rows:
+        return None
+    emb = [r[2] for r in rows]
+    dim = len(emb[0]) // 4
+    m = np.frombuffer(b"".join(emb), np.float32).reshape(len(rows), dim)
+    ids = np.fromiter((r[1] for r in rows), np.int64, len(rows))
+    sizes = np.fromiter((float(r[3] or 0) for r in rows), np.float32, len(rows))
+    return m, ids, sizes, rows[-1][0]
+
+
 def _matrix(con, event_id):
-    """(signatures, photo ids, face widths) of an album, kept in memory."""
+    """(signatures, photo ids, face widths) of an album, kept in memory.
+    Loaded once; afterwards only the faces added since (by a running scan) are
+    read, so a guest never waits for the whole album to be read again."""
     with _cache_lock:
-        if event_id in _cache:
-            return _cache[event_id]
-    rows = con.execute("SELECT photo_id, embedding, size FROM faces WHERE event_id=?",
-                       (event_id,)).fetchall()
-    if rows:
-        m = np.vstack([np.frombuffer(r["embedding"], np.float32) for r in rows])
-        ids = np.array([r["photo_id"] for r in rows])
-        sizes = np.array([float(r["size"] or 0) for r in rows], np.float32)
-    else:
-        m, ids, sizes = np.zeros((0, 1), np.float32), np.array([], int), np.zeros(0, np.float32)
-    with _cache_lock:
-        _cache[event_id] = (m, ids, sizes)
-    return m, ids, sizes
+        entry = _cache.get(event_id)
+        last = entry[3] if entry else 0
+        rows = con.execute("SELECT id, photo_id, embedding, size FROM faces "
+                           "WHERE event_id=? AND id>? ORDER BY id", (event_id, last)).fetchall()
+        new = _arrays(rows)
+        if entry is None:
+            entry = ((new[0], new[1], new[2], new[3]) if new else
+                     (np.zeros((0, 1), np.float32), np.array([], np.int64),
+                      np.zeros(0, np.float32), 0))
+        elif new:
+            entry = (np.vstack([entry[0], new[0]]), np.concatenate([entry[1], new[1]]),
+                     np.concatenate([entry[2], new[2]]), new[3])
+        _cache[event_id] = entry
+        return entry[0], entry[1], entry[2]
+
+
+def warm(event_ids):
+    """Reads albums into memory in the background (at start-up and when a scan
+    ends), so the first selfie after that is not the one that waits."""
+    def run():
+        c = db.connect()
+        try:
+            for eid in event_ids:
+                _matrix(c, eid)
+        except Exception:
+            pass
+        finally:
+            c.close()
+    threading.Thread(target=run, daemon=True).start()
 
 
 def match(m, sizes, vec, threshold=None):
