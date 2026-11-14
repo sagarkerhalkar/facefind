@@ -2,7 +2,7 @@
 <div class="flow" id="{{ id }}" aria-roledescription="carousel" aria-label="Next events and offers">
 {% for p in items %}{% if p.link %}<a class="promo{{ '' if p.image else ' plain' }}" href="{{ p.link }}" target="_blank" rel="noopener noreferrer">{% else %}<div class="promo{{ '' if p.image else ' plain' }}">{% endif %}
 {% if p.image %}<img src="{{ url_for('brand_promo', pid=p.id) }}?v={{ p.created_at|int }}" alt="" loading="lazy">{% endif %}
-<div class="txt">{% if p.kind == 'event' and p.event_date %}<span class="when">{{ p.event_date.split('-')|reverse|join('-') }}</span>{% endif %}
+<div class="txt">{% if p.kind in ('event','past') and p.event_date %}<span class="when">{{ 'Happened ' if p.kind == 'past' }}{{ p.event_date.split('-')|reverse|join('-') }}</span>{% endif %}
 <b>{{ p.title }}</b>{% if p.body %}<span>{{ p.body }}</span>{% endif %}</div>
 {% if p.link %}</a>{% else %}</div>{% endif %}{% endfor %}
 </div>

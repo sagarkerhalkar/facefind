@@ -24,7 +24,7 @@
 
 <form class="card" method="post" action="{{ url_for('admin_promo_create') }}" enctype="multipart/form-data"><input type="hidden" name="csrf" value="{{ csrf }}">
 <h2>Add a next event or an offer</h2>
-<div class="row"><div><label for="kind">What is it?</label><select id="kind" name="kind"><option value="event">Next event</option><option value="ad">Offer or advertisement</option></select></div>
+<div class="row"><div><label for="kind">What is it?</label><select id="kind" name="kind"><option value="event">Next event</option><option value="past">Past event (stays after the date)</option><option value="ad">Offer or advertisement</option></select></div>
 <div><label for="pdate">Date (next events hide themselves after this day)</label><input id="pdate" name="event_date" type="date"></div></div>
 <label for="ptitle">Title</label><input id="ptitle" name="title" type="text" maxlength="90" required>
 <label for="pbody">Details</label><textarea id="pbody" name="body" maxlength="400" rows="2"></textarea>
@@ -36,7 +36,7 @@
 </form>
 <div class="card"><h2>Shown to guests</h2>{% if promo_rows %}<div class="scroll"><table>
 <tr><th>Title</th><th>Type</th><th>Date</th><th>Where</th><th></th></tr>
-{% for p in promo_rows %}<tr><td>{{ p.title }}</td><td>{{ "Next event" if p.kind == 'event' else "Offer" }}</td><td>{{ p.event_date or "-" }}</td>
+{% for p in promo_rows %}<tr><td>{{ p.title }}</td><td>{{ "Next event" if p.kind == 'event' else ("Past event" if p.kind == 'past' else "Offer") }}</td><td>{{ p.event_date or "-" }}</td>
 <td>{{ "Before" if p.show_before }}{{ " and " if p.show_before and p.show_after }}{{ "After" if p.show_after }} login{% if not p.active %} <span class="pill off">Hidden</span>{% endif %}</td>
 <td><form class="inline" method="post" action="{{ url_for('admin_promo_action', pid=p.id, action='toggle') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small ghost">{{ "Hide" if p.active else "Show" }}</button></form>
 <form class="inline" method="post" action="{{ url_for('admin_promo_action', pid=p.id, action='delete') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small danger">Delete</button></form></td></tr>{% endfor %}
