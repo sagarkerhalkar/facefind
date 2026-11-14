@@ -58,6 +58,7 @@ over many drives:
 
 | 26 | "Loading is taking too much time", app experience is bad; six voice notes from a guest about the app; always keep GitHub updated | The voice notes could not be listened to (no speech-to-text in the build environment) - the owner was asked to type what the guest said. **Photo page loads faster**: the scan now keeps a small copy (about 520 pixels) of every photo that has a face; tiles are made from that copy instead of the original, are about a quarter of the size to send, and the first 60 are prepared in the background right after the selfie search. The full-page view shows the small picture at once and then sharpens. Browsers may keep previews for an hour. On the test photo a tile took 7 ms to make instead of 209 ms. Albums need "Scan every photo again" once to get the small copies; until then tiles are made from the original as before |
 | 27 | Start-up crash "database disk image is malformed" and the website showing "Internal Server Error" (14 Nov 11:09) | `db.repair()`: a damaged `data/facefind.db` is copied to `data/broken-db/<time>/`, a new one is built and every readable record is copied across; the app starts. Also a friendly error page with a reference, and the real reason in `data/error.log`. Tested. |
+| 28 | "I should be able to delete the old event also" (14 Nov 11:11) | "Delete this album" on every album: removes photo list, faces, saved photos and small copies; originals untouched; download report kept; refused while a scan runs. Test added. |
 
 ## Files a user runs
 

@@ -1599,6 +1599,31 @@ def admin_google_key():
                                          + d["client_email"] + " and paste their links."))
 
 
+def _delete_album(c, eid):
+    """Removes an old album from this app: its photo list, faces, saved photos,
+    small copies. The original photos on the drives are never touched. The
+    record of who downloaded what stays, so the report is still complete."""
+    ev = c.execute("SELECT name FROM events WHERE id=?", (eid,)).fetchone()
+    if not ev:
+        return "That album was already removed."
+    if indexer.progress.get(eid, {}).get("state") == "running":
+        return "A scan is running for this album. Delete it when the scan has finished."
+    while True:
+        ids = [r[0] for r in c.execute("SELECT id FROM photos WHERE event_id=? LIMIT 2000", (eid,))]
+        if not ids:
+            break
+        for pid in ids:
+            indexer._forget_photo(c, pid)
+        c.commit()
+    for sql in ("DELETE FROM faces WHERE event_id=?", "DELETE FROM scan_errors WHERE event_id=?",
+                "DELETE FROM otps WHERE event_id=?", "DELETE FROM events WHERE id=?"):
+        c.execute(sql, (eid,))
+    db.kv_set(c, f"scanning:{eid}", None)
+    indexer.progress.pop(eid, None)
+    db.audit(c, "album_deleted", event_id=eid, detail=ev["name"], ip=ip())
+    return f"Album \"{ev['name']}\" deleted. Your original photos were not touched."
+
+
 @app.post("/admin/events/<int:eid>/<action>")
 def admin_event_action(eid, action):
     if not admin_post_ok():
@@ -1640,6 +1665,8 @@ def admin_event_action(eid, action):
         c.execute("UPDATE events SET active=1-active WHERE id=?", (eid,))
     elif action == "approval":
         c.execute("UPDATE events SET require_approval=1-require_approval WHERE id=?", (eid,))
+    elif action == "delete":
+        msg = _delete_album(c, eid)
     else:
         abort(404)
     c.commit()

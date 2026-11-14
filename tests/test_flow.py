@@ -632,6 +632,22 @@ _log = (config.DATA_DIR / "error.log").read_text(encoding="utf-8")
 assert "test crash" in _log and "ref " in _log
 print("ok crash page")
 
+# an old album can be deleted; the report of downloads stays
+import db as _db
+_c = _db.connect()
+_n0 = _c.execute("SELECT COUNT(*) FROM photos WHERE event_id=?", (ev["id"],)).fetchone()[0]
+assert _n0 > 0
+_dl0 = _c.execute("SELECT COUNT(*) FROM downloads").fetchone()[0]
+assert adm.post(f"/admin/events/{ev['id']}/delete").status_code == 403          # needs the admin form token
+_r = adm.post(f"/admin/events/{ev['id']}/delete", data={"csrf": csrf}, follow_redirects=True)
+assert b"deleted" in _r.data
+for _t in ("events", "photos", "faces"):
+    assert _c.execute(f"SELECT COUNT(*) FROM {_t} WHERE " + ("id" if _t == "events" else "event_id") + "=?", (ev["id"],)).fetchone()[0] == 0, _t
+assert _c.execute("SELECT COUNT(*) FROM downloads").fetchone()[0] == _dl0
+assert adm.get("/admin").status_code == 200
+_c.close()
+print("ok  an old album can be deleted, downloads report kept")
+
 # a damaged database repairs itself instead of stopping the app
 import db
 _con = db.connect(); _con.execute("INSERT OR REPLACE INTO kv(k,v) VALUES('repair-test','kept')"); _con.commit(); _con.close()
