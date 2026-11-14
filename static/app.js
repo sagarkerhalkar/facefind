@@ -1,4 +1,10 @@
 (() => {
+  const tb = document.getElementById("gtheme");
+  if (tb) tb.addEventListener("click", () => {
+    const dark = document.documentElement.dataset.theme !== "dark";
+    document.documentElement.dataset.theme = dark ? "dark" : "light";
+    try { localStorage.setItem("ff_theme", dark ? "dark" : "light"); } catch (e) { /* private mode */ }
+  });
   const app = document.getElementById("app");
   if (!app) return;
   const code = app.dataset.code, portal = app.dataset.portal === "1", lookFirst = app.dataset.look === "1";
