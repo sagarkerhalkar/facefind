@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#5b5ce6">
+<title>{{ title or "Admin" }} - {{ brand }}</title>
+<script src="{{ url_for('static', filename='theme.js') }}?v={{ static_v('theme.js') }}"></script>
+<link rel="stylesheet" href="{{ url_for('static', filename='admin.css') }}?v={{ static_v('admin.css') }}">
+<link rel="stylesheet" href="{{ url_for('brand_theme') }}?v={{ studio.v }}">
+</head>
+<body>
+{% include "admin/_icons.html" %}
+<div id="bar" role="progressbar" aria-hidden="true"></div>
+<div class="shell">
+<nav class="side" aria-label="Sections">
+  <a class="mark" href="{{ url_for('admin') }}">{% if studio.logo %}<img src="{{ url_for('brand_logo') }}?v={{ studio.v }}" alt="{{ brand }}">{% else %}{{ brand }}{% endif %}</a>
+  <a class="nav {{ 'on' if page == 'albums' }}" href="{{ url_for('admin') }}"><svg class="ic"><use href="#i-albums"/></svg><span>Albums</span>{% if pending_n %}<span class="badge">{{ pending_n }}</span>{% endif %}</a>
+  {% if owner %}
+  <a class="nav {{ 'on' if page in ('guests', 'guest') }}" href="{{ url_for('admin_guests') }}"><svg class="ic"><use href="#i-users"/></svg><span>Guests</span></a>
+  <a class="nav {{ 'on' if page == 'brand' }}" href="{{ url_for('admin_brand') }}"><svg class="ic"><use href="#i-palette"/></svg><span>Look</span></a>
+  <a class="nav {{ 'on' if page == 'team' }}" href="{{ url_for('admin_team') }}"><svg class="ic"><use href="#i-shield"/></svg><span>Staff</span></a>
+  <a class="nav {{ 'on' if page == 'settings' }}" href="{{ url_for('admin_settings_page') }}"><svg class="ic"><use href="#i-gear"/></svg><span>Settings</span></a>
+  <a class="nav {{ 'on' if page == 'speed' }}" href="{{ url_for('admin_speed_page') }}"><svg class="ic"><use href="#i-gauge"/></svg><span>Speed</span></a>
+  {% endif %}
+  <div class="grow"></div>
+  <div class="who"><span>Signed in as <b>{{ who }}</b></span>
+    <div class="row2"><button type="button" class="ghost small" id="theme" aria-label="Light or dark"><svg class="ic"><use href="#i-moon"/></svg></button>
+    <form method="post" action="{{ url_for('admin_logout') }}" data-plain><button class="ghost small" type="submit"><svg class="ic"><use href="#i-logout"/></svg> Sign out</button></form></div></div>
+</nav>
+<div>
+<header class="mobtop"><a class="mark" href="{{ url_for('admin') }}">{% if studio.logo %}<img src="{{ url_for('brand_logo') }}?v={{ studio.v }}" alt="{{ brand }}">{% else %}{{ brand }}{% endif %}</a>
+  <button type="button" class="ghost icon-btn" id="theme2" aria-label="Light or dark"><svg class="ic"><use href="#i-moon"/></svg></button>
+  <form method="post" action="{{ url_for('admin_logout') }}" data-plain><button class="ghost icon-btn" aria-label="Sign out"><svg class="ic"><use href="#i-logout"/></svg></button></form></header>
+<main class="work" id="view" data-page="{{ page }}">
+<div id="flash" data-msg="{{ msg }}" hidden></div>
+{% block view %}{% endblock %}
+</main></div>
+</div>
+<div id="toasts" aria-live="polite"></div>
+<dialog id="confirm" class="center"><div class="modal"><h2 id="c-title">Are you sure?</h2><p id="c-text" class="hint"></p>
+<div class="acts"><button type="button" class="ghost" id="c-no">Cancel</button><button type="button" class="danger" id="c-yes">Yes</button></div></div></dialog>
+<script src="{{ url_for('static', filename='admin.js') }}?v={{ static_v('admin.js') }}"></script>
+</body>
+</html>

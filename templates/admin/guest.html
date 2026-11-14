@@ -1,0 +1,23 @@
+{% extends layout %}
+{% block view %}
+<div class="view">
+<p><a href="{{ url_for('admin_guests') }}">&larr; All guests</a></p>
+<h1>{{ u.name or u.email }}</h1>
+<div class="stats">
+  <div class="stat"><span class="ico"><svg class="ic"><use href="#i-download"/></svg></span><div><b>{{ "{:,}".format(total) }}</b><span>photos downloaded</span></div></div>
+  <div class="stat"><span class="ico"><svg class="ic"><use href="#i-download"/></svg></span><div><b>{{ saved }}</b><span>photos saved</span></div></div>
+  <div class="stat"><span class="ico"><svg class="ic"><use href="#i-download"/></svg></span><div><b>{{ albums|length }}</b><span>albums</span></div></div>
+</div>
+<div class="card"><p><b>Phone:</b> {{ u.phone }} &nbsp; <b>Email:</b> {{ u.email }} &nbsp; <b>Last sign-in:</b> {{ fmt(u.last_login) }}</p>
+{% if albums %}<p class="hint">{% for a in albums %}{{ a.name }}: {{ a.n }}{{ ", " if not loop.last }}{% endfor %}</p>{% endif %}
+<a class="btn ghost small" href="{{ url_for('admin_downloads_csv', email=u.email) }}">Excel file for this guest</a></div>
+<div class="card">{% if files %}<div class="scroll"><table><tr><th>Time</th><th>Album</th><th>Photo</th><th>IP</th></tr>
+{% for f in files %}<tr><td>{{ fmt(f.ts) }}</td><td>{{ f.album }}</td><td>{{ f.relpath }}</td><td>{{ f.ip }}</td></tr>{% endfor %}
+</table></div>{% else %}<p>This guest has not downloaded a photo yet.</p>{% endif %}</div>
+{% if pages > 1 %}<nav class="pager" aria-label="Pages">
+{% if page_no > 1 %}<a class="btn ghost small" href="{{ url_for('admin_guest', email=u.email, page=page_no-1) }}">Previous</a>{% endif %}
+<span>Page {{ page_no }} of {{ pages }}</span>
+{% if page_no < pages %}<a class="btn ghost small" href="{{ url_for('admin_guest', email=u.email, page=page_no+1) }}">Next</a>{% endif %}
+</nav>{% endif %}
+</div>
+{% endblock %}

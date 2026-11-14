@@ -1,0 +1,45 @@
+{% extends layout %}
+{% block view %}
+<div class="view">
+<div class="head"><h1>Look and promotions</h1></div>
+<form class="card" method="post" action="{{ url_for('admin_brand_save') }}" enctype="multipart/form-data"><input type="hidden" name="csrf" value="{{ csrf }}">
+<h2>Your studio</h2>
+<div class="row"><div><label for="brand">Studio name</label><input id="brand" name="brand" type="text" value="{{ brand }}" maxlength="60" required></div>
+<div><label for="accent">Main colour (buttons, highlights)</label><input id="accent" name="accent" type="color" value="{{ accent }}"></div></div>
+<label for="tagline">Line under the title on the sign-in page</label>
+<input id="tagline" name="tagline" type="text" value="{{ tagline }}" maxlength="140">
+<div class="row">
+<div><label for="logo">Logo (PNG with clear background works best)</label>
+{% if studio.logo %}<img class="preview-logo" src="{{ url_for('brand_logo') }}?v={{ studio.v }}" alt="Current logo">
+<label class="check"><input type="checkbox" name="remove_logo"><span>Remove the logo</span></label>{% endif %}
+<input id="logo" name="logo" type="file" accept="image/*"></div>
+<div><label for="background">Sign-in background picture</label>
+{% if studio.background %}<img class="preview-bg" src="{{ url_for('brand_background') }}?v={{ studio.v }}" alt="Current background">
+<label class="check"><input type="checkbox" name="remove_background"><span>Remove the picture</span></label>{% endif %}
+<input id="background" name="background" type="file" accept="image/*"></div>
+</div>
+<label class="check"><input type="checkbox" name="stamp" {{ 'checked' if stamp }}><span>Put the logo, small, in the top right corner of every downloaded photo. JPG, PNG, WEBP and TIFF are sent as JPG with the logo; iPhone HEIC photos get the logo too. Camera RAW files (ARW, CR2, NEF ...) are sent unchanged, because turning them into JPG would lose the RAW.</span></label>
+<button type="submit">Save look</button>
+</form>
+
+<form class="card" method="post" action="{{ url_for('admin_promo_create') }}" enctype="multipart/form-data"><input type="hidden" name="csrf" value="{{ csrf }}">
+<h2>Add a next event or an offer</h2>
+<div class="row"><div><label for="kind">What is it?</label><select id="kind" name="kind"><option value="event">Next event</option><option value="ad">Offer or advertisement</option></select></div>
+<div><label for="pdate">Date (next events hide themselves after this day)</label><input id="pdate" name="event_date" type="date"></div></div>
+<label for="ptitle">Title</label><input id="ptitle" name="title" type="text" maxlength="90" required>
+<label for="pbody">Details</label><textarea id="pbody" name="body" maxlength="400" rows="2"></textarea>
+<div class="row"><div><label for="plinkurl">Link (optional)</label><input id="plinkurl" name="link" type="url" placeholder="https://"></div>
+<div><label for="pimage">Picture (optional)</label><input id="pimage" name="image" type="file" accept="image/*"></div></div>
+<label class="check"><input type="checkbox" name="show_before" checked><span>Show on the sign-in page (before login)</span></label>
+<label class="check"><input type="checkbox" name="show_after" checked><span>Show after login, under the photos</span></label>
+<button type="submit">Add</button>
+</form>
+<div class="card"><h2>Shown to guests</h2>{% if promo_rows %}<div class="scroll"><table>
+<tr><th>Title</th><th>Type</th><th>Date</th><th>Where</th><th></th></tr>
+{% for p in promo_rows %}<tr><td>{{ p.title }}</td><td>{{ "Next event" if p.kind == 'event' else "Offer" }}</td><td>{{ p.event_date or "-" }}</td>
+<td>{{ "Before" if p.show_before }}{{ " and " if p.show_before and p.show_after }}{{ "After" if p.show_after }} login{% if not p.active %} <span class="pill off">Hidden</span>{% endif %}</td>
+<td><form class="inline" method="post" action="{{ url_for('admin_promo_action', pid=p.id, action='toggle') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small ghost">{{ "Hide" if p.active else "Show" }}</button></form>
+<form class="inline" method="post" action="{{ url_for('admin_promo_action', pid=p.id, action='delete') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small danger">Delete</button></form></td></tr>{% endfor %}
+</table></div>{% else %}<p>Nothing yet. Add your next event or an offer above.</p>{% endif %}</div>
+</div>
+{% endblock %}

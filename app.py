@@ -1,6 +1,8 @@
 """FaceFind - guests verify their email with an OTP, take a selfie, and get
 only the photos they appear in. Run:  python app.py"""
 import base64
+import collections
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import io
 import hmac
@@ -8,6 +10,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import sqlite3
 import string
 import sys
@@ -177,9 +180,15 @@ def _csrf_guard():
             abort(403)
 
 
+_timings = collections.deque(maxlen=3000)        # (time, route, milliseconds) - the Speed page
+
+
 @app.after_request
 def _headers(r):
     took = time.time() - g.get("t0", time.time())
+    r.headers["Server-Timing"] = f"app;dur={took * 1000:.0f}"
+    if request.endpoint and request.endpoint != "static":
+        _timings.append((time.time(), request.endpoint, took * 1000))
     if took > 1.0:                 # anything slower than a second is written down
         _elog.warning("SLOW %.1fs  %s %s -> %s", took, request.method, request.full_path, r.status_code)
     r.headers["Content-Security-Policy"] = (
@@ -1075,10 +1084,63 @@ def fmt_time(t):
     return time.strftime("%d %b %Y %H:%M", time.localtime(t)) if t else "-"
 
 
+_dir_cache = {}                       # folder -> (when, exists)
+_dir_pool = ThreadPoolExecutor(8)
+
+
+def fast_isdir(path, wait=1.5, keep=30):
+    """Is this folder there? A disconnected or slow drive can make the operating
+    system wait for many seconds, so the answer is asked for in the background,
+    waited for only briefly, and remembered for half a minute."""
+    now = time.time()
+    hit = _dir_cache.get(path)
+    if hit and now - hit[0] < keep:
+        return hit[1]
+    fut = _dir_pool.submit(lambda: Path(path).is_dir())
+    try:
+        ok = fut.result(timeout=wait)
+    except Exception:
+        return bool(hit and hit[1])       # no answer yet: keep what we knew
+    _dir_cache[path] = (now, ok)
+    return ok
+
+
+_TITLES = dict(albums="Albums", guests="Guests", guest="Guest", brand="Look", team="Staff",
+               settings="Settings", speed="Speed check")
+
+
 def admin_page(page, **kw):
+    layout = "admin/_bare.html" if request.headers.get("X-PJAX") else "admin/base.html"
     return render_template(
-        "admin.html", page=page, csrf=session["csrf"], owner=is_owner(), who=who(),
+        f"admin/{page}.html", layout=layout, page=page, title=_TITLES.get(page, "Admin"),
+        csrf=session["csrf"], owner=is_owner(), who=who(), pending_n=pending_count(),
         msg=request.args.get("msg", ""), fmt=fmt_time, today=time.strftime("%Y-%m-%d"), **kw)
+
+
+_pend = [0, 0]
+
+
+def pending_count():
+    """People waiting for approval (shown on the Albums menu); asked at most every 5 s."""
+    if time.time() - _pend[0] > 5:
+        _pend[1] = con().execute("SELECT COUNT(*) FROM sessions WHERE status='pending' AND expires_at>?",
+                                 (time.time(),)).fetchone()[0]
+        _pend[0] = time.time()
+    return _pend[1]
+
+
+_tot = {"t": 0, "v": None}
+
+
+def cached_totals(c):
+    """Album, photo, guest and download totals; recounted at most every 10 s."""
+    if time.time() - _tot["t"] > 10 or _tot["v"] is None:
+        _tot["v"] = dict(albums=c.execute("SELECT COUNT(*) FROM events").fetchone()[0],
+                         photos=c.execute("SELECT COUNT(*) FROM photos").fetchone()[0],
+                         guests=c.execute("SELECT COUNT(*) FROM users").fetchone()[0],
+                         downloads=c.execute("SELECT COUNT(*) FROM downloads").fetchone()[0])
+        _tot["t"] = time.time()
+    return _tot["v"]
 
 
 def paging(total, per):
@@ -1109,20 +1171,27 @@ def admin():
     sql = (" WHERE " + " AND ".join(where)) if where else ""
     total = c.execute("SELECT COUNT(*) FROM events" + sql, args).fetchone()[0]
     page, pages, offset = paging(total, ALBUMS_PER_PAGE)
+    rows = c.execute("SELECT * FROM events" + sql + " ORDER BY id DESC LIMIT ? OFFSET ?",
+                     args + [ALBUMS_PER_PAGE, offset]).fetchall()
+    ids = [r["id"] for r in rows]
+    mark = ",".join("?" * len(ids))
+    n_ph = dict(c.execute(f"SELECT event_id, COUNT(*) FROM photos WHERE event_id IN ({mark}) GROUP BY event_id", ids).fetchall()) if ids else {}
+    n_fc = dict(c.execute(f"SELECT event_id, COUNT(*) FROM faces WHERE event_id IN ({mark}) GROUP BY event_id", ids).fetchall()) if ids else {}
+    n_er = dict(c.execute(f"SELECT event_id, COUNT(*) FROM scan_errors WHERE event_id IN ({mark}) GROUP BY event_id", ids).fetchall()) if ids else {}
+    names = dict((k[11:], v) for k, v in c.execute("SELECT k, v FROM kv WHERE k LIKE 'drive_name:%'").fetchall())
     events = []
-    for e in c.execute("SELECT * FROM events" + sql + " ORDER BY id DESC LIMIT ? OFFSET ?",
-                       args + [ALBUMS_PER_PAGE, offset]).fetchall():
+    for e in rows:
         e = dict(e)
-        e["photos"] = c.execute("SELECT COUNT(*) FROM photos WHERE event_id=?", (e["id"],)).fetchone()[0]
-        e["faces"] = c.execute("SELECT COUNT(*) FROM faces WHERE event_id=?", (e["id"],)).fetchone()[0]
+        e["photos"], e["faces"], e["n_errors"] = n_ph.get(e["id"], 0), n_fc.get(e["id"], 0), n_er.get(e["id"], 0)
         e["status"], e["state"] = status_text(e["id"], e["photos"], e["faces"])
-        e["folder_list"] = [(gdrive.label(f), gdrive.is_drive(f) or Path(f).is_dir())
+        e["folder_list"] = [(f"Google Drive: {names.get(f[7:]) or f[7:]}" if gdrive.is_drive(f) else f,
+                             gdrive.is_drive(f) or fast_isdir(f))
                             for f in db.split_folders(e["folders"])]
         e["link"] = guest_link(e["code"])
         e["errors"] = c.execute("SELECT relpath, reason FROM scan_errors WHERE event_id=? LIMIT 200",
-                                (e["id"],)).fetchall()
-        e["n_errors"] = c.execute("SELECT COUNT(*) FROM scan_errors WHERE event_id=?",
-                                  (e["id"],)).fetchone()[0]
+                                (e["id"],)).fetchall() if e["n_errors"] else []
+        e["live"] = live_numbers(e["id"])
+        e["fresh"] = time.time() - e["created_at"] < 20
         events.append(e)
     pending = c.execute(
         "SELECT s.id, s.email, s.created_at, s.date_from, s.date_to, "
@@ -1130,10 +1199,7 @@ def admin():
         "(SELECT COUNT(*) FROM matches m WHERE m.session_id=s.id) AS n "
         "FROM sessions s LEFT JOIN events e ON e.id=s.event_id "
         "WHERE s.status='pending' AND s.expires_at>? ORDER BY s.id LIMIT 50", (time.time(),)).fetchall()
-    totals = dict(albums=c.execute("SELECT COUNT(*) FROM events").fetchone()[0],
-                  photos=c.execute("SELECT COUNT(*) FROM photos").fetchone()[0],
-                  guests=c.execute("SELECT COUNT(*) FROM users").fetchone()[0],
-                  downloads=c.execute("SELECT COUNT(*) FROM downloads").fetchone()[0])
+    totals = cached_totals(c)
     return admin_page("albums", events=events, pending=pending, totals=totals, q=q, show=show,
                       total=total, page_no=page, pages=pages,
                       portal_link=guest_link("") if config.PORTAL else "",
@@ -1375,6 +1441,13 @@ def admin_team_action(sid, action):
     return redirect(url_for("admin_team", msg=msg))
 
 
+@app.get("/admin/speed")
+def admin_speed_page():
+    if not is_owner():
+        return redirect(url_for("admin"))
+    return admin_page("speed")
+
+
 @app.get("/admin/settings")
 def admin_settings_page():
     if not is_owner():
@@ -1433,6 +1506,152 @@ def status_text(eid, photos, faces):
     return f"Ready - {photos} photos, {faces} faces found.{last}{note}", "ready"
 
 
+def live_numbers(eid):
+    """Numbers behind the progress bar of an album that is being scanned."""
+    p = indexer.progress.get(eid) or {}
+    if p.get("state") != "running":
+        return dict(running=False)
+    done, total = p.get("done", 0), p.get("total", 0)
+    took = max(1e-6, time.time() - p.get("started", time.time()))
+    rate = p.get("scanned", 0) / took if p.get("scanned", 0) >= 5 else 0
+    return dict(running=True, done=done, total=total, listing=bool(p.get("listing")),
+                pct=round(100 * done / total, 1) if total else 0,
+                rate=round(rate, 1),
+                eta=int((total - done) / rate) if rate and total and not p.get("listing") else None)
+
+
+def _drive_kind(path):
+    """Windows: what kind of disk holds this folder (a network or removable drive
+    is a common reason for a slow or damaged database)."""
+    if os.name != "nt":
+        return ""
+    try:
+        import ctypes
+        root = os.path.splitdrive(os.path.abspath(path))[0] + "\\"
+        kinds = {2: "removable (USB)", 3: "internal disk", 4: "NETWORK drive", 5: "CD/DVD", 6: "RAM disk"}
+        return kinds.get(ctypes.windll.kernel32.GetDriveTypeW(root), "unknown")
+    except Exception:
+        return ""
+
+
+def speed_report():
+    """Measures the things that make an admin page slow on THIS computer, one
+    by one, and says which one it is."""
+    out, tips = {}, []
+    # 1. the database: opening it and reading
+    t = []
+    for _ in range(20):
+        t0 = time.time()
+        c = db.connect(); c.execute("SELECT COUNT(*) FROM events").fetchone(); c.close()
+        t.append((time.time() - t0) * 1000)
+    out["db_open_read_ms"] = round(sum(t) / len(t), 1)
+    # 2. saving: one small commit on a scratch file next to the database (what a scan does per batch)
+    scratch = config.DATA_DIR / "speedtest.db"
+    try:
+        import sqlite3
+        k = sqlite3.connect(scratch, timeout=10)
+        k.execute("CREATE TABLE IF NOT EXISTS t(a)")
+        t = []
+        for i in range(10):
+            t0 = time.time(); k.execute("INSERT INTO t VALUES(?)", (i,)); k.commit(); t.append((time.time() - t0) * 1000)
+        k.close(); scratch.unlink(missing_ok=True)
+        out["db_commit_ms"] = round(sum(t) / len(t), 1)
+    except Exception as e:
+        out["db_commit_ms"] = None
+    # 3. the disk: write and read 16 MB
+    blob = os.urandom(16 * 1024 * 1024); f = config.DATA_DIR / "speedtest.bin"
+    try:
+        t0 = time.time()
+        with open(f, "wb") as fh:
+            fh.write(blob); fh.flush(); os.fsync(fh.fileno())
+        out["disk_write_mbs"] = round(16 / max(1e-3, time.time() - t0), 1)
+        t0 = time.time(); f.read_bytes()
+        out["disk_read_mbs"] = round(16 / max(1e-3, time.time() - t0), 1)
+    finally:
+        f.unlink(missing_ok=True)
+    try:
+        du = shutil.disk_usage(config.DATA_DIR)
+        out["disk_free_gb"] = round(du.free / 1e9, 1)
+    except OSError:
+        out["disk_free_gb"] = None
+    out["db_size_mb"] = round(config.DB_PATH.stat().st_size / 1e6, 1) if config.DB_PATH.exists() else 0
+    out["db_disk"] = _drive_kind(config.DATA_DIR)
+    c = con()
+    out["journal"] = c.execute("PRAGMA journal_mode").fetchone()[0]
+    # 4. this computer's processor: is something else using it?
+    t0 = time.time(); sum(i * i for i in range(400000)); out["cpu_burn_ms"] = round((time.time() - t0) * 1000)
+    out["cpus"] = os.cpu_count()
+    out["scans_running"] = sum(1 for p in indexer.progress.values() if p.get("state") == "running")
+    # 5. every album folder: how long it takes to answer
+    folders = []
+    for r in c.execute("SELECT name, folders FROM events ORDER BY id DESC LIMIT 60"):
+        for fo in db.split_folders(r["folders"]):
+            if not gdrive.is_drive(fo):
+                folders.append((r["name"], fo))
+    slow = []
+    def probe(item):
+        t0 = time.time()
+        try:
+            ok = Path(item[1]).is_dir()
+            if ok:
+                next(os.scandir(item[1]), None)
+        except OSError:
+            ok = False
+        return item, ok, (time.time() - t0) * 1000
+    with ThreadPoolExecutor(8) as pool:
+        for item, ok, ms in pool.map(probe, folders[:60]):
+            if ms > 150 or not ok:
+                slow.append(dict(album=item[0], folder=item[1], ok=ok, ms=round(ms)))
+    out["folders_checked"], out["folders_slow"] = len(folders[:60]), slow
+    # 6. Google Drive
+    if gdrive.key_info():
+        try:
+            t0 = time.time(); gdrive.token(); out["drive_token_ms"] = round((time.time() - t0) * 1000)
+        except Exception as e:
+            out["drive_token_ms"] = None
+    # what the app itself measured for real requests
+    by = collections.defaultdict(list)
+    for _, name, ms in list(_timings):
+        by[name].append(ms)
+    rows = []
+    for name, v in by.items():
+        v.sort()
+        rows.append(dict(route=name, n=len(v), avg=round(sum(v) / len(v)), p95=round(v[int(len(v) * .95) - 1] if len(v) > 1 else v[0]), worst=round(v[-1])))
+    out["routes"] = sorted(rows, key=lambda r: -r["p95"])[:12]
+    # verdict, in plain words
+    if out["db_commit_ms"] and out["db_commit_ms"] > 40:
+        tips.append(f"Saving to the database takes {out['db_commit_ms']:.0f} ms. That is a slow disk. Put DATA_DIR on an internal SSD (not USB, network or a synced folder).")
+    if out["db_disk"] in ("NETWORK drive", "removable (USB)"):
+        tips.append(f"The data folder is on a {out['db_disk']}. Move it to an internal disk: DATA_DIR=C:\\facefind-data in .env.")
+    if out["disk_write_mbs"] and out["disk_write_mbs"] < 40:
+        tips.append(f"The disk writes only {out['disk_write_mbs']} MB/s - slow for previews and thumbnails.")
+    if out["cpu_burn_ms"] > 120:
+        tips.append(f"The processor is busy (a simple test took {out['cpu_burn_ms']} ms, normally under 60). Other programs, antivirus or a running scan are using it.")
+    for sl in slow:
+        tips.append(("Folder not reachable: " if not sl["ok"] else f"Folder is slow to answer ({sl['ms']} ms): ") + sl["folder"] + f"  (album {sl['album']})")
+    if (out.get("drive_token_ms") or 0) > 1500:
+        tips.append(f"Google took {out['drive_token_ms']} ms to answer. The internet line is slow.")
+    if not tips:
+        tips.append("This computer looks fine. If pages still feel slow, the delay is on the way to the browser (internet line or tunnel). The page time shown above splits server time from network time.")
+    out["tips"] = tips
+    return out
+
+
+@app.get("/admin/speed/run")
+def admin_speed_run():
+    if not is_owner():
+        abort(403)
+    return jsonify(speed_report())
+
+
+@app.get("/admin/ping")
+def admin_ping():
+    """Answers at once; the browser times it to separate network from server."""
+    if not is_admin():
+        abort(403)
+    return jsonify(ok=True)
+
+
 @app.get("/admin/status")
 def admin_status():
     """Live scan status of the albums on the page (ids=1,2,3)."""
@@ -1442,11 +1661,13 @@ def admin_status():
     ids = [int(x) for x in request.args.get("ids", "").split(",") if x.isdigit()][:50]
     if not ids:
         ids = [r[0] for r in c.execute("SELECT id FROM events ORDER BY id DESC LIMIT 50")]
+    mark = ",".join("?" * len(ids))
+    n_ph = dict(c.execute(f"SELECT event_id, COUNT(*) FROM photos WHERE event_id IN ({mark}) GROUP BY event_id", ids).fetchall())
+    n_fc = dict(c.execute(f"SELECT event_id, COUNT(*) FROM faces WHERE event_id IN ({mark}) GROUP BY event_id", ids).fetchall())
     for eid in ids:
-        n = c.execute("SELECT COUNT(*) FROM photos WHERE event_id=?", (eid,)).fetchone()[0]
-        f = c.execute("SELECT COUNT(*) FROM faces WHERE event_id=?", (eid,)).fetchone()[0]
+        n, f = n_ph.get(eid, 0), n_fc.get(eid, 0)
         text, state = status_text(eid, n, f)
-        out[eid] = dict(text=text, state=state)
+        out[eid] = dict(text=text, state=state, photos=n, faces=f, **live_numbers(eid))
     return jsonify(out)
 
 
@@ -1593,17 +1814,13 @@ def _clean_folders(text):
             if not gdrive.key_info():
                 bad.append("Google Drive is not connected yet - see 'Google Drive links' on this page")
                 continue
-            if not gdrive.known_name(fid):
-                try:                      # check right now that the robot can see it
-                    gdrive.remember_name(fid, gdrive.folder_name(fid))
-                except gdrive.DriveError as e:
-                    bad.append(str(e))
-                    continue
+            # Whether the robot can see the folder is checked by the scan itself, in the
+            # background (it says so on the album card), so adding an album never waits.
             if entry not in good:
                 good.append(entry)
         elif f.lower().startswith(("http://", "https://")):
             bad.append(f"{f} (this is not a Google Drive FOLDER link)")
-        elif Path(f).is_dir():
+        elif fast_isdir(f, wait=3, keep=0):
             r = str(Path(f).resolve())
             if r not in good:
                 good.append(r)

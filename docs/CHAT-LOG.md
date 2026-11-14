@@ -257,6 +257,14 @@ search, and browsers may keep previews for an hour.
 
 ---
 
+## 14 November, 13:31
+
+**You:** "Still slow when event adding on admin panel, all admin panel is too slow, why latency on every page ... and event should move automatically ... UI/UX is not at all as I given reference site ... I gave you full authority to change, even start from 0 ... international / global level."
+
+**Reply (short):** Measured the admin on a 10-lakh-photo test database: the pages themselves take 20-70 ms, and a running scan did not slow them, so the delay on your PC is something outside the code (disk, a switched-off drive, antivirus, the line to Cloudflare). Added a built-in **Speed** page (Admin > Speed) that measures database saving, disk, processor, every album folder and Google on your PC and says in words which one is slow, plus server time versus network time for the page. Fixes that are certain: folder checks never wait for a slow drive (answered in the background, remembered 30 s), one query for all album counts, totals cached 10 s, adding an album no longer calls Google (the scan does, and reports it on the card). New admin: sidebar and phone tab bar, light and dark, pages change without reloading, new album from a side sheet, the new card appears at once with a live progress bar, live counts, toasts, confirm dialogs, search as you type.
+
+---
+
 ## Still open
 
 - Wrong person in selfie results. Waiting for two answers from the owner:

@@ -1,0 +1,56 @@
+{% extends layout %}
+{% block view %}
+<div class="view">
+<div class="head"><h1>Settings</h1></div>
+<div class="card"><h2>Google Drive</h2>
+{% if drive_email %}
+<p class="status ready">Connected. Photos stay on Drive: they are read for scanning and are not saved on this computer.</p>
+<label for="robot">Share each Drive folder with this email (Viewer is enough), then paste its link in a new album</label>
+<div class="linkrow"><input id="robot" type="text" readonly value="{{ drive_email }}">
+<button type="button" class="copy nomargin" data-target="robot" data-label="Copy email">Copy email</button></div>
+{% else %}
+<p class="status">Not connected yet. One-time setup, about 5 minutes:</p>
+<ol class="hint">
+<li>Open <b>console.cloud.google.com</b>, sign in, and create a project named facefind.</li>
+<li>Menu, APIs and Services, Library: search <b>Google Drive API</b> and press Enable.</li>
+<li>Menu, IAM and Admin, Service Accounts: Create service account, name it facefind, press Done.</li>
+<li>Click that account, Keys, Add key, Create new key, JSON. A .json file downloads.</li>
+<li>Upload that file here:</li>
+</ol>
+<form method="post" action="{{ url_for('admin_google_key') }}" enctype="multipart/form-data"><input type="hidden" name="csrf" value="{{ csrf }}">
+<label for="key">Google key file (.json)</label>
+<input id="key" name="key" type="file" accept=".json,application/json" required>
+<button type="submit">Connect Google Drive</button></form>
+{% endif %}</div>
+
+<form class="card" method="post" action="{{ url_for('admin_settings') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="what" value="look_first">
+<h2>Looking before signing in</h2>
+<label class="check"><input type="checkbox" name="look_first" {{ 'checked' if look_first }}><span>Guests can take a selfie and see their watermarked previews without a code. Downloading and saving still need name, phone and the email code.</span></label>
+<p class="hint">With this on, anyone who has the link can see previews of a person by uploading that person's picture. Turn it off for private events.</p>
+<button type="submit">Save</button></form>
+
+<form class="card" method="post" action="{{ url_for('admin_settings') }}"><input type="hidden" name="csrf" value="{{ csrf }}">
+<h2>Match strictness</h2>
+<label for="threshold">How alike two faces must be (0.30 to 0.80)</label>
+<input id="threshold" name="threshold" type="number" min="0.30" max="0.80" step="0.01" value="{{ threshold }}" required>
+<p class="hint">Higher = fewer photos of other people, but some of the guest's own photos may be missed. To choose: use "Test with my own selfie" on an album; each photo shows its score. If another person's photo shows 0.52, set this to 0.55. No new scan is needed.</p>
+{% if reported %}<p class="note">Guests pressed "This is not me" on {{ reported.n }} photo{{ '' if reported.n == 1 else 's' }}. Their scores were {{ "%.2f"|format(reported.low) }} to {{ "%.2f"|format(reported.high) }}. A strictness of {{ "%.2f"|format(reported.suggest) }} would have left all of them out.</p>{% endif %}
+<button type="submit">Save strictness</button></form>
+
+<form class="card" method="post" action="{{ url_for('admin_settings') }}"><input type="hidden" name="csrf" value="{{ csrf }}">
+<h2>Scan speed and detail</h2>
+<label for="scan_side">How closely each photo is searched for faces</label>
+<select id="scan_side" name="scan_side">
+<option value="1280" {{ 'selected' if scan_side == 1280 }}>Fast - good for most photos</option>
+<option value="1600" {{ 'selected' if scan_side == 1600 }}>Detailed - finds smaller faces in group photos, about a third slower</option>
+<option value="2000" {{ 'selected' if scan_side == 2000 }}>Very detailed - large group photos, about twice as slow as Fast</option></select>
+<p class="hint">Used from the next scan on. Photos already scanned stay as they are.</p>
+<button type="submit">Save scan detail</button></form>
+
+<details class="card"><summary>Activity log (last 200 actions)</summary>
+<div class="scroll"><table>
+<tr><th>Time</th><th>Email</th><th>Action</th><th>Detail</th><th>IP</th></tr>
+{% for a in log %}<tr><td>{{ fmt(a.ts) }}</td><td>{{ a.email or "" }}</td><td>{{ a.action }}</td><td>{{ a.detail }}</td><td>{{ a.ip }}</td></tr>{% endfor %}
+</table></div></details>
+</div>
+{% endblock %}

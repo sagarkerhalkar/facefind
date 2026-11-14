@@ -1,0 +1,17 @@
+{% extends layout %}
+{% block view %}
+<div class="view">
+<div class="head"><div><h1>Speed check</h1><p class="hint">Finds out, on this computer, what makes pages slow. Takes about 5 seconds.</p></div><div class="sp"></div>
+  <button type="button" class="accent" id="speed-run"><svg class="ic"><use href="#i-gauge"/></svg> Run the check</button></div>
+<div class="card"><h2>This page, right now</h2>
+  <div class="meter" id="page-meter"><div class="m"><b>-</b><span>measuring ...</span></div></div>
+  <p class="hint">"Server" is the time the app needed. "Network" is everything else on the way to your browser (internet line, tunnel, TLS).</p></div>
+<div class="card" id="speed-out" hidden><h2>What was measured</h2>
+  <ul class="tips" id="speed-tips"></ul>
+  <div class="meter" id="speed-meter"></div>
+  <h3 class="mt16">Slowest pages (real visits since the app started)</h3>
+  <div class="scroll"><table><thead><tr><th>Page</th><th>Visits</th><th>Average</th><th>Slowest 5%</th><th>Worst</th></tr></thead><tbody id="speed-routes"></tbody></table></div>
+  <p class="mt16"><button type="button" class="ghost small" id="speed-copy"><svg class="ic"><use href="#i-copy"/></svg> Copy this report</button></p>
+</div>
+</div>
+{% endblock %}
