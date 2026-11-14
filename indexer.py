@@ -79,6 +79,24 @@ def _drive_image(info):
     return faces.load(gdrive.fetch_full(info["id"]), ext), "full"
 
 
+def _small_copy(img):
+    """JPEG bytes of the picture at tile size (made while it is in memory anyway)."""
+    try:
+        import cv2
+        h, w = img.shape[:2]
+        s = config.THUMB_SIDE / max(h, w)
+        if s < 1:
+            img = cv2.resize(img, (max(1, int(w * s)), max(1, int(h * s))), interpolation=cv2.INTER_AREA)
+        ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 82])
+        return buf.tobytes() if ok else None
+    except Exception:
+        return None
+
+
+def thumb_path(pid):
+    return config.THUMB_DIR / f"{int(pid) // 1000:05d}" / f"{int(pid)}.jpg"
+
+
 def _embed_file(job):
     """Runs in a scanning thread: read one photo, return its face signatures."""
     t0 = time.time()
@@ -96,6 +114,7 @@ def _embed_file(job):
         vecs = engine.embed(img)
         sizes = getattr(engine, "sizes", None) or []
         job["sizes"] = sizes if len(sizes) == len(vecs) else [0.0] * len(vecs)
+        job["thumb"] = _small_copy(img) if vecs else None
         job["t_face"] = time.time() - t1
         return job, vecs, ""
     except Exception as e:
@@ -126,13 +145,15 @@ def _drop_cache(event_id):
         _cache.pop(event_id, None)
 
 
-def preview_path(row):
-    """Where the watermarked preview of a photo is kept. The name changes
-    when the photo changes, so an old preview can never be shown for it."""
+def preview_path(row, small=False):
+    """Where the watermarked preview of a photo is kept (large, or the small
+    one for the photo page). The name changes when the photo changes, so an
+    old preview can never be shown for it."""
     import hashlib
+    side = config.THUMB_SIDE if small else config.PREVIEW_SIDE
     tag = hashlib.sha256(f"{row['root']}|{row['relpath']}|{row['mtime']}|{row['stamp']}"
-                         f"|{config.PREVIEW_SIDE}|{config.PREVIEW_TAG}".encode()).hexdigest()[:16]
-    return config.CACHE_DIR / f"{row['id']}-{tag}.jpg"
+                         f"|{side}|{config.PREVIEW_TAG}".encode()).hexdigest()[:16]
+    return config.CACHE_DIR / f"{row['id']}-{tag}{'-s' if small else ''}.jpg"
 
 
 def drop_preview(pid):
@@ -150,6 +171,10 @@ def _forget_photo(con, pid):
     con.execute("DELETE FROM faces WHERE photo_id=?", (pid,))
     con.execute("DELETE FROM matches WHERE photo_id=?", (pid,))
     con.execute("DELETE FROM bookmarks WHERE photo_id=?", (pid,))
+    try:
+        thumb_path(pid).unlink(missing_ok=True)
+    except OSError:
+        pass
     con.execute("DELETE FROM photos WHERE id=?", (pid,))
     drop_preview(pid)
 
@@ -238,6 +263,16 @@ def index_event(event_id):
                         [(pid, event_id, v.astype(np.float32).tobytes(), f"{z:.0f}")
                          for v, z in zip(vecs, job["sizes"])])
                     st["faces"] += len(vecs)
+                    tp = thumb_path(pid)
+                    if job.get("thumb"):
+                        try:
+                            tp.parent.mkdir(parents=True, exist_ok=True)
+                            tp.write_bytes(job["thumb"])
+                        except OSError:
+                            pass
+                    else:
+                        tp.unlink(missing_ok=True)
+                    job["thumb"] = None
                 if todo:
                     con.commit()                # guests can already find these photos
                     _drop_cache(event_id)

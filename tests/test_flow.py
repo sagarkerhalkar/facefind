@@ -571,6 +571,19 @@ m_ = int(max(im_.size) * 0.018); px_ = im_.getpixel((im_.width - m_ - 14, m_ + 5
 assert px_[1] > 150 and px_[0] < 120, px_
 print("ok  previews carry the studio logo")
 
+# quick photo page: a small copy is kept from the scan, tiles are small, the browser may keep previews
+pid0 = seen["photos"][0]
+assert indexer.thumb_path(pid0).exists()
+small_ = lk.get(f"/api/preview/{pid0}?s=t"); large_ = lk.get(f"/api/preview/{pid0}")
+assert small_.status_code == 200 and max(Image.open(io.BytesIO(small_.data)).size) <= config.THUMB_SIDE < max(Image.open(io.BytesIO(large_.data)).size)
+assert small_.headers["Cache-Control"] == "private, max-age=3600" and "X-Keep" not in small_.headers
+assert lk.get("/api/me").headers["Cache-Control"] == "no-store" and A.app.test_client().get(f"/api/preview/{pid0}?s=t").status_code == 404
+(pa / "r.png").rename(pa / "r.away")                       # original gone (drive off): the tile still loads from the kept copy
+for f in config.CACHE_DIR.glob(f"{pid0}-*-s.jpg"): f.unlink()
+assert lk.get(f"/api/preview/{pid0}?s=t").status_code == 200
+(pa / "r.away").rename(pa / "r.png")
+print("ok  small tiles come from the copy kept by the scan; previews may be kept by the browser")
+
 # the port stays the same from start to start
 import socket as _so
 import netutil

@@ -56,6 +56,8 @@ over many drives:
 
 | 25 | Photos shuffle on the photo page; a selfie still brings another person; logo must be on previews, top right; guests should be able to look without OTP (preview only); if something goes wrong the guest must be able to go back; sign-in experience still poor; the port changes (8444 / 8787) and must be fixed; after login no company picture; no progress bar, just "12 photos of you" | **Look first**: one button "Find my photos" - consent, events, selfie, previews - with no code; name, phone and email code are asked once, when the guest downloads or saves, and the photos stay on screen (owner can switch this off in Settings). **Back** button on every step, the browser Back button works, errors keep the guest on the same step with a "try again"; name, phone and email are remembered on the device; the code verifies itself when the sixth digit is typed; "Send a new code" after 30 s. **Photo page**: fixed tiles that never move while loading, offers no longer move by themselves, the steps bar is gone, the studio picture is not shown after the first screen. **Logo** on every preview, top right. **"This is not me"** removes a photo and records its score; Settings shows the strictness that would have excluded the reported photos. **One fixed port**, remembered in `data/port.txt`; `start-web.bat` tunnels that same port, so the office address and the web address work together. Also fixed: the full-page viewer was wider than the screen on phones |
 
+| 26 | "Loading is taking too much time", app experience is bad; six voice notes from a guest about the app; always keep GitHub updated | The voice notes could not be listened to (no speech-to-text in the build environment) - the owner was asked to type what the guest said. **Photo page loads faster**: the scan now keeps a small copy (about 520 pixels) of every photo that has a face; tiles are made from that copy instead of the original, are about a quarter of the size to send, and the first 60 are prepared in the background right after the selfie search. The full-page view shows the small picture at once and then sharpens. Browsers may keep previews for an hour. On the test photo a tile took 7 ms to make instead of 209 ms. Albums need "Scan every photo again" once to get the small copies; until then tiles are made from the original as before |
+
 ## Files a user runs
 
 | File | Purpose |
@@ -87,6 +89,8 @@ over many drives:
 - With "look first" ON, anyone who has the link can see watermarked previews
   of a person by uploading that person's picture. Downloads still need the
   email code and are recorded. Switch it off for private events.
+- The small copies kept by the scan use disk space: roughly 15-40 KB per
+  photo with a face, so about 2-4 GB for one lakh photos, in `data/thumbs`.
 - Face matching is never 100%: look-alikes, small or blurred faces can give a
   wrong photo. Higher strictness means fewer wrong photos and more missed ones.
 - Without approval and without a liveness check, a person can upload someone

@@ -130,6 +130,8 @@ def _headers(r):
         r.headers["Strict-Transport-Security"] = "max-age=31536000"
     if request.path.startswith("/brand/") and r.status_code == 200:
         r.headers["Cache-Control"] = "public, max-age=86400"      # addresses carry a version
+    elif r.headers.pop("X-Keep", None) and r.status_code == 200:
+        r.headers["Cache-Control"] = "private, max-age=3600"      # previews: this browser only
     elif not request.path.startswith("/static/"):
         r.headers["Cache-Control"] = "no-store"
     return r
@@ -213,16 +215,25 @@ def real_path(folders, root, relpath):
     return p
 
 
-def preview_file(row):
-    """The small watermarked preview of one photo (made once, then kept).
-    A Google Drive photo is read from Drive for this - it is never copied.
-    When it cannot be made, g.why says why (shown to the admin)."""
+def preview_file(row, small=False):
+    """The watermarked preview of one photo (made once, then kept): large for
+    the full-page view, small for the photo page. The small one is made from
+    the copy kept by the scan, so the original (which may be on Google Drive)
+    is not read again. When it cannot be made, g.why says why."""
     if row["root"] not in db.split_folders(row["folders"]):
         g.why = "its folder was taken off the album"
         abort(404)
-    dest = indexer.preview_path(row)
+    dest = indexer.preview_path(row, small)
     if dest.exists():
         return dest
+    side = config.THUMB_SIDE if small else config.PREVIEW_SIDE
+    kept = indexer.thumb_path(row["id"])
+    if small and kept.exists():
+        try:
+            make_preview(kept, dest, "", side)
+            return dest
+        except (OSError, ValueError):
+            pass
     try:
         if gdrive.is_drive(row["root"]) and not old_copy(row):
             if not row["ref"]:
@@ -236,11 +247,11 @@ def preview_file(row):
             except gdrive.DriveError as e:
                 g.why = f"Google Drive: {e}"
                 abort(503)
-            make_preview(io.BytesIO(data), dest, ext)
+            make_preview(io.BytesIO(data), dest, ext, side)
         else:
             g.why = "file not found - the drive is not connected, or the photo was moved"
             src = old_copy(row) or real_path(row["folders"], row["root"], row["relpath"])
-            make_preview(src, dest, Path(row["relpath"]).suffix)
+            make_preview(src, dest, Path(row["relpath"]).suffix, side)
     except (OSError, ValueError, RuntimeError) as e:        # unreadable or damaged picture
         g.why = f"the picture could not be opened ({e})"
         abort(404)
@@ -269,7 +280,7 @@ def drive_download(ref, name):
         mimetype=r.headers.get("Content-Type") or "application/octet-stream")
 
 
-def make_preview(src, dest, ext=""):
+def make_preview(src, dest, ext="", side=None):
     if ext.lower() in config.HEIC_EXT | config.RAW_EXT:      # iPhone / camera RAW files
         import numpy as np
         bgr = faces.load(src.read() if hasattr(src, "read") else Path(src).read_bytes(), ext)
@@ -277,8 +288,11 @@ def make_preview(src, dest, ext=""):
             raise ValueError("no picture could be read from this file")
         im = Image.fromarray(np.ascontiguousarray(bgr[:, :, ::-1]))
     else:
-        im = ImageOps.exif_transpose(Image.open(src)).convert("RGB")
-    im.thumbnail((config.PREVIEW_SIDE, config.PREVIEW_SIDE))
+        im = Image.open(src)
+        im.draft("RGB", (side or config.PREVIEW_SIDE,) * 2)    # big JPEGs open several times faster at reduced size
+        im = ImageOps.exif_transpose(im).convert("RGB")
+    side = side or config.PREVIEW_SIDE
+    im.thumbnail((side, side))
     layer = Image.new("RGBA", im.size, (0, 0, 0, 0))
     d = ImageDraw.Draw(layer)
     font = ImageFont.load_default(size=max(14, im.width // 24))
@@ -295,7 +309,7 @@ def make_preview(src, dest, ext=""):
         except Exception:
             pass
     tmp = dest.with_suffix(f".{secrets.token_hex(4)}.tmp")
-    out.save(tmp, "JPEG", quality=72)
+    out.save(tmp, "JPEG", quality=72, optimize=True, progressive=True)
     os.replace(tmp, dest)
 
 
@@ -694,6 +708,11 @@ def selfie():
              f"| album has {n_faces} faces"
              + (f" | {len(albums)} albums, {date_from} to {date_to}" if not log_event else ""), ip())
     c.commit()
+    if found and status == "matched":
+        ids = [pid for pid, _ in found[:60]]
+        warm_previews(c.execute(
+            "SELECT p.*, e.folders FROM photos p JOIN events e ON e.id=p.event_id "
+            f"WHERE p.id IN ({','.join('?' * len(ids))})", ids).fetchall())
     pend = config.SELFIE_DIR / f"{s['id']}.jpg"
     if status == "pending":      # kept only until you approve / reject
         pend.write_bytes(raw)
@@ -708,7 +727,31 @@ def preview(pid):
     row = allowed(s, pid) if s else None
     if not row:
         abort(404)
-    return send_file(preview_file(row), mimetype="image/jpeg")
+    r = send_file(preview_file(row, request.args.get("s") == "t"), mimetype="image/jpeg")
+    r.headers["X-Keep"] = "1"               # the browser may keep it for an hour (see _headers)
+    return r
+
+
+def warm_previews(rows):
+    """Right after a selfie search: get the first tiles ready in the
+    background, so they are there when the browser asks for them."""
+    import threading
+    todo = [dict(r) for r in rows[:60] if not indexer.preview_path(r, True).exists()]
+    if not todo:
+        return
+
+    for i in range(3):
+        chunk = todo[i::3]
+        if chunk:
+            threading.Thread(target=lambda c=chunk: [_warm_one(x) for x in c], daemon=True).start()
+
+
+def _warm_one(row):
+    try:
+        with app.test_request_context():
+            preview_file(row, True)
+    except Exception:
+        pass
 
 
 def photo_bytes(row):
