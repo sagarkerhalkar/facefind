@@ -32,6 +32,7 @@ CACHE_DIR.mkdir(exist_ok=True)
 SELFIE_DIR = DATA_DIR / "pending_selfies"
 SELFIE_DIR.mkdir(exist_ok=True)
 DB_PATH = DATA_DIR / "facefind.db"
+BACKUP_DIR = DATA_DIR / "backups"
 GOOGLE_KEY = DATA_DIR / "google-key.json"           # uploaded on the admin page
 DRIVE_DIR = Path(os.environ.get("DRIVE_CACHE", DATA_DIR / "drive"))  # old versions copied Drive photos here
 MODELS_DIR = Path(os.environ.get("MODELS_DIR", BASE / "models"))
@@ -125,3 +126,9 @@ RAW_EXT = {".arw", ".cr2", ".cr3", ".nef", ".nrw", ".dng", ".raf", ".rw2", ".orf
 IMAGE_EXT = {".jpg", ".jpeg", ".jpe", ".jfif", ".png", ".webp", ".bmp", ".tif", ".tiff"} \
     | HEIC_EXT | RAW_EXT
 OTHER_EXT = {".gif", ".psd", ".mp4", ".mov", ".avi", ".pdf"}   # seen but not photos
+
+# Database safety. WAL mode needs a normal local disk; on a network, virtual or
+# cloud-synced drive it can damage the file, so the safe mode is the default.
+DB_WAL = os.environ.get("DB_WAL", "0").strip().lower() in ("1", "true", "yes", "on")
+BACKUP_EVERY_MIN = int(os.environ.get("BACKUP_EVERY_MIN", "20") or 20)
+BACKUPS_KEPT = int(os.environ.get("BACKUPS_KEPT", "6") or 6)

@@ -23,5 +23,13 @@ if not exist .env (
     exit /b 1
   )
 )
+
+:run
 python app.py
+if errorlevel 3 (
+  echo.
+  echo The database was damaged - repairing it and starting again ...
+  timeout /t 2 /nobreak >nul
+  goto run
+)
 pause

@@ -657,7 +657,7 @@ config.DB_PATH = config.DATA_DIR / "repair-test.db"
 try:
     db.init()
     _con = db.connect(); _con.execute("INSERT OR REPLACE INTO kv(k,v) VALUES('repair-test','kept')"); _con.commit(); _con.close()
-    _con = sqlite3.connect(config.DB_PATH); _con.execute("PRAGMA wal_checkpoint(TRUNCATE)"); _con.close()
+    assert db.backup_now()                          # a good copy exists before the damage
     with open(config.DB_PATH, "r+b") as _f:         # wreck the start of the file
         _f.seek(0); _f.write(b"\x00garbage" * 800)
     for _x in ("-wal", "-shm"):
@@ -667,6 +667,7 @@ try:
     _con = db.connect(); assert _con.execute("PRAGMA quick_check").fetchone()[0] == "ok"
     _con.execute("SELECT count(*) FROM events"); _con.close()
     assert list((config.DATA_DIR / "broken-db").glob("*/repair-test.db"))
+    _con = db.connect(); assert _con.execute("SELECT v FROM kv WHERE k='repair-test'").fetchone()[0] == "kept"; _con.close()
 finally:
     config.DB_PATH = _live
 print("ok  damaged database is kept aside, rebuilt, and the app starts")
