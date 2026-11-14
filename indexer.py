@@ -452,8 +452,10 @@ def match(m, sizes, vec, threshold=None):
     thr = config.MATCH_THRESHOLD if threshold is None else threshold
     sims = m @ vec
     need = np.where((sizes > 0) & (sizes < config.SMALL_FACE), thr + config.SMALL_FACE_EXTRA, thr)
+    if len(sims):
+        need = np.maximum(need, float(sims.max()) - config.REL_MARGIN)
     cand = np.nonzero(sims >= need)[0]
-    if len(cand) >= 4:
+    if len(cand) >= 3:
         order = cand[np.argsort(-sims[cand])]
         core = order[:max(3, len(order) // 4)]
         centre = m[core].mean(axis=0) + vec / len(core)

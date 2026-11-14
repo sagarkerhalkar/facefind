@@ -50,7 +50,11 @@
       });
     }
     function step(n) { front = (front + n + cards.length) % cards.length; place(); }
-    function play() { /* cards move only when the guest moves them: nothing shifts by itself */ }
+    function play() {            // next events turn by themselves; hovering or reduced motion stops it
+      clearInterval(timer);
+      if (calm || cards.length < 2) return;
+      timer = setInterval(() => { if (!document.hidden) step(1); }, 3500);
+    }
     cards.forEach((c, i) => c.addEventListener("click", (e) => {
       if (i !== front) { e.preventDefault(); front = i; place(); }      // a side card comes to the front first
     }));
