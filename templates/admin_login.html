@@ -9,14 +9,19 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='admin.css') }}?v={{ static_v('admin.css') }}">
 <link rel="stylesheet" href="{{ url_for('brand_theme') }}?v={{ studio.v }}">
 </head>
-<body><div class="login"><section class="box">
-<span class="mark">{% if studio.logo %}<img src="{{ url_for('brand_logo') }}?v={{ studio.v }}" alt="{{ brand }}">{% else %}{{ brand }}{% endif %}</span>
+<body><div class="login">
+<aside class="side"><span class="mark">{% if studio.logo %}<img src="{{ url_for('brand_logo') }}?v={{ studio.v }}" alt="{{ brand }}">{% else %}{{ brand }}{% endif %}</span>
+<h2>Every guest finds their own photos.</h2>
+<p>Run albums, approve guests, see downloads and keep the whole library in one place.</p>
+<ul><li>Photos stay where they are: drives, Google Drive, S3, Dropbox</li><li>Guests only ever see their own photos</li><li>Every download is recorded</li></ul></aside>
+<main class="main"><section class="box">
 <h1>Staff sign in</h1><p class="hint">Albums, guests and settings.</p>
 {% if msg %}<p class="msg" role="alert">{{ msg }}</p>{% endif %}
 <form method="post">
 <label for="username">User name</label>
-<input id="username" name="username" type="text" autocomplete="username" placeholder="Leave empty if you are the owner">
+<input id="username" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="Leave empty if you are the owner">
 <label for="password">Password</label>
-<input id="password" name="password" type="password" autocomplete="current-password" required>
-<button type="submit" class="wide accent">Sign in</button></form></section></div>
+<div class="passrow"><input id="password" name="password" type="password" autocomplete="current-password" required autofocus><button type="button" data-toggle-pass="password" aria-label="Show or hide the password">Show</button></div>
+<button type="submit" class="wide accent">Sign in</button></form>
+<p class="hintline">Forgot the password? The owner can reset it in the <code>.env</code> file on the server.</p></section></main></div>
 </body></html>
