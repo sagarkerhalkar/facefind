@@ -234,3 +234,14 @@ html[data-theme=dark] .grid figure.ready { background:var(--mute); }
 body:not(.in) .how h2 { color:#fff; }
 .mark { white-space:nowrap; } .steps li span { white-space:nowrap; }
 @media (max-width:600px) { .mark { font-size:1.02rem; } .steps li.on { padding-right:8px; } .steps li.on span { font-size:.8rem; } .themer { margin-left:2px; } }
+
+/* older browsers without color-mix(): plain colours so nothing disappears */
+@supports not (color: color-mix(in srgb, red, blue)) {
+  .backdrop { background:var(--bg); }
+  body:not(.in) .backdrop::after { background:linear-gradient(100deg,rgba(6,10,20,.86),rgba(6,10,20,.55) 55%,rgba(6,10,20,.74)); }
+  .top { background:var(--bg); }
+  .badge-ic { background:var(--mute); }
+}
+.themer { flex:none; min-width:40px; }
+@media (pointer:coarse) { button.link, button.back { min-height:44px; } .check input { width:24px; height:24px; } }
+@supports not (min-height:100dvh) { body { min-height:100vh; } }
