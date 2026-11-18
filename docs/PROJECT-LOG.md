@@ -154,3 +154,4 @@ over many drives:
 4. Optional later: "Sign in with Google" instead of the key file, QR code for
    the guest link, hosting on a domain.
 | 41 | Mail fix: fixed greeting name (`localhost`) for Gmail SMTP (server dropped the connection with this PC's own name) | `mailer.connect`, testmail.py, setup.py |
+| 42 | Download record: photo preview, visitor IP from Cloudflare, place (city/region/country) | app.py place(), db downloads.place, guest.html |

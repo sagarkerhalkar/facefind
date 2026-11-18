@@ -470,6 +470,19 @@ assert u1.post(f"/api/bookmark/{mine1}", json={"on": True}).status_code == 403  
 assert u1.post(f"/api/bookmark/{mine1}", json={"on": True}, headers=H).json["on"] is True
 assert u1.get("/api/me").json["saved"] == [mine1]
 u1.get(u1.post(f"/api/download-link/{mine1}", json={}, headers=H).json["url"])
+# the download record keeps a preview link and the visitor's place (from Cloudflare headers)
+config.TRUST_PROXY = True
+try:
+    u1.get(u1.post(f"/api/download-link/{mine1}", json={}, headers=H).json["url"],
+           headers={"CF-Connecting-IP": "203.0.113.7", "CF-IPCity": "Pune", "CF-Region": "Maharashtra", "CF-IPCountry": "IN"})
+finally:
+    config.TRUST_PROXY = False
+_dl = con.execute("SELECT ip,place FROM downloads WHERE email='u1@x.com' ORDER BY id DESC LIMIT 1").fetchone()
+assert _dl["ip"] == "203.0.113.7" and _dl["place"] == "Pune, Maharashtra, IN", dict(_dl)
+_gp = adm.get("/admin/guest?email=u1@x.com").get_data(as_text=True)
+assert "Pune, Maharashtra, IN" in _gp and f"/admin/photo/{mine1}" in _gp and "<th>Place</th>" in _gp
+assert "Pune, Maharashtra, IN" in adm.get("/admin/downloads.csv").get_data(as_text=True)
+con.execute("DELETE FROM downloads WHERE ip='203.0.113.7'"); con.commit()
 assert u1.post("/api/forget", json={}, headers=H).status_code == 200
 # next visit: sign in again, saved photos are there without a new selfie; others still are not
 con.execute("DELETE FROM otps"); con.commit(); sent.clear(); u2 = A.app.test_client(); login(u2, "u1@x.com")

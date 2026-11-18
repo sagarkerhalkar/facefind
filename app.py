@@ -89,7 +89,21 @@ def _close(_):
 
 def ip():
     a = request.remote_addr or ""
+    if config.TRUST_PROXY:                  # behind the Cloudflare tunnel: the visitor's own address
+        a = request.headers.get("CF-Connecting-IP", "").strip()[:45] or a
     return a[7:] if a.startswith("::ffff:") else a
+
+
+def place():
+    """Where the visitor is, as Cloudflare tells us (only when we sit behind it).
+    The country is always sent; city and region need 'Add visitor location
+    headers' switched on in Cloudflare (Rules, Transform Rules, Managed)."""
+    if not config.TRUST_PROXY:
+        return ""
+    h = request.headers
+    parts = [h.get("CF-IPCity", ""), h.get("CF-Region", ""), h.get("CF-IPCountry", "")]
+    parts = [p.strip()[:40] for p in parts if p.strip() and p.strip() not in ("XX", "T1")]
+    return ", ".join(dict.fromkeys(parts))
 
 
 def err(msg, status=400):
@@ -279,8 +293,8 @@ def signin_needed():
 
 def record_download(c, s, row):
     """The admin's record: who took which photo, and when."""
-    c.execute("INSERT INTO downloads(ts,email,photo_id,event_id,relpath,ip) VALUES(?,?,?,?,?,?)",
-              (time.time(), s["email"], row["id"], row["event_id"], row["relpath"], ip()))
+    c.execute("INSERT INTO downloads(ts,email,photo_id,event_id,relpath,ip,place) VALUES(?,?,?,?,?,?,?)",
+              (time.time(), s["email"], row["id"], row["event_id"], row["relpath"], ip(), place()))
 
 
 def real_path(folders, root, relpath):
@@ -1286,7 +1300,7 @@ def admin_guest():
     total = c.execute("SELECT COUNT(*) FROM downloads WHERE email=?", (email,)).fetchone()[0]
     page, pages, offset = paging(total, 50)
     files = c.execute(
-        "SELECT d.ts, d.relpath, d.ip, COALESCE(e.name, 'Deleted album') AS album FROM downloads d "
+        "SELECT d.ts, d.photo_id, d.relpath, d.ip, d.place, COALESCE(e.name, 'Deleted album') AS album FROM downloads d "
         "LEFT JOIN events e ON e.id=d.event_id WHERE d.email=? ORDER BY d.id DESC LIMIT 50 OFFSET ?",
         (email, offset)).fetchall()
     albums = c.execute(
@@ -1697,14 +1711,14 @@ def admin_downloads_csv():
         out = io.StringIO()
         w = csv.writer(out)
         try:
-            w.writerow(["Time", "Name", "Phone", "Email", "Album", "Photo", "IP"])
+            w.writerow(["Time", "Name", "Phone", "Email", "Album", "Photo", "IP", "Place"])
             for r in c.execute(
                     "SELECT d.ts, u.name, u.phone, d.email, COALESCE(e.name, '') AS album, "
-                    "d.relpath, d.ip FROM downloads d LEFT JOIN users u ON u.email=d.email "
+                    "d.relpath, d.ip, d.place FROM downloads d LEFT JOIN users u ON u.email=d.email "
                     "LEFT JOIN events e ON e.id=d.event_id WHERE 1=1" + dsql + " ORDER BY d.id DESC",
                     dargs):
                 row = [time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(r["ts"])), r["name"] or "",
-                       r["phone"] or "", r["email"], r["album"], r["relpath"], r["ip"]]
+                       r["phone"] or "", r["email"], r["album"], r["relpath"], r["ip"], r["place"] or ""]
                 # a cell that starts with = + - @ would be run as a formula by Excel
                 w.writerow([("'" + v) if isinstance(v, str) and v[:1] in "=+-@" else v for v in row])
                 if out.tell() > 64 * 1024:

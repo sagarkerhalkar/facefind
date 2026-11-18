@@ -253,3 +253,12 @@ Never expose the app to the internet over plain `http://`.
 stand-in face engine, so it needs no models). `python tests/test_engine.py`
 checks that the real face models load. GitHub runs both on Windows, Linux
 and macOS after every push (`.github/workflows/ci.yml`).
+
+## Where a download happened (place)
+
+Admin, Guests and downloads, click a guest: every download shows a small photo preview (click it to
+open the photo), the time, the visitor's IP address and the place. The place comes from Cloudflare, so
+it works when you use the tunnel (`TRUST_PROXY=1`). The country is always known. For city and region,
+in Cloudflare open your domain, Rules, Transform Rules, Managed Transforms, and switch on
+**Add visitor location headers**. The place is a guess from the IP address (usually the right city,
+sometimes only the phone company's city). The Excel file has the same Place column.
