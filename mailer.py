@@ -25,17 +25,24 @@ def send_brevo(api_key, sender, to, subject, text):
                            + e.read().decode("utf-8", "replace")[:200])
 
 
+def connect(host, port, timeout=20):
+    """Opens the mail connection. The greeting name is fixed: by default Python
+    sends this PC's own name, and Gmail drops the connection when that name has
+    odd characters (spaces, underscores, non-English letters)."""
+    ctx = ssl.create_default_context()
+    if port == 465:
+        return smtplib.SMTP_SSL(host, 465, context=ctx, timeout=timeout,
+                                local_hostname="localhost")
+    s = smtplib.SMTP(host, port, timeout=timeout, local_hostname="localhost")
+    s.starttls(context=ctx)
+    return s
+
+
 def send_smtp(to, subject, text):
     msg = EmailMessage()
     msg["Subject"], msg["From"], msg["To"] = subject, config.MAIL_FROM, to
     msg.set_content(text)
-    ctx = ssl.create_default_context()
-    if config.SMTP_PORT == 465:
-        s = smtplib.SMTP_SSL(config.SMTP_HOST, 465, context=ctx, timeout=20)
-    else:
-        s = smtplib.SMTP(config.SMTP_HOST, config.SMTP_PORT, timeout=20)
-        s.starttls(context=ctx)
-    with s:
+    with connect(config.SMTP_HOST, config.SMTP_PORT) as s:
         s.login(config.SMTP_USER, config.SMTP_PASSWORD)
         s.send_message(msg)
 
