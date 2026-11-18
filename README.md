@@ -13,10 +13,16 @@ Nobody else can open or download them.
    (6 characters or more), the mail id that sends the OTP, and the port.
    To change the answers later run `setup.bat`.
 4. The window prints the addresses, for example
-   `https://192.168.1.50:8443/admin`. Open it and sign in with your admin
+   `https://192.168.1.50:8850/admin`. Open it and sign in with your admin
    password.
 
 On Mac or Linux use `./start.sh` instead.
+
+**On a server that other people will use:** during setup answer *yes* to "Will guests open it
+from the internet through a Cloudflare tunnel" and type your web address; setup then writes
+`PUBLIC_URL`, `TRUST_PROXY=1` and `NO_BROWSER=1` for you. It also offers to start FaceFind by
+itself when Windows starts and to open the firewall port (run setup, or `install-service.bat`,
+as Administrator). The default port is 8850, chosen so it does not clash with other apps.
 
 ## The `.env` settings
 
@@ -66,7 +72,7 @@ how alike two faces must be; use "Test with my own selfie" to see the scores.
 
 ## On the web
 
-The app keeps one port: the first start chooses it (8443, or the next free
+The app keeps one port: the first start chooses it (8850, or the next free
 one) and writes it to `data/port.txt`; every later start uses the same
 port. If that port is taken, the app says so and stops - usually FaceFind
 is already running in another window.
@@ -172,7 +178,7 @@ by itself. Settings are in `.env`:
 
 | Setting | Meaning |
 |---|---|
-| `PORT` | First port to try (8443). If it is busy, the app takes the next free port and prints it |
+| `PORT` | First port to try (8850). If it is busy, the app takes the next free port and prints it |
 | `HOST` | `0.0.0.0` = whole LAN, `127.0.0.1` = this computer only |
 | `HTTPS` | `1` = built-in HTTPS with an automatic certificate |
 | `ALLOWED_NETWORKS` | Networks / VLANs allowed to open the app, e.g. `192.168.10.0/24,192.168.20.0/24`. Empty = any |
@@ -181,7 +187,7 @@ by itself. Settings are in `.env`:
 Three things to do once:
 
 1. **Windows Firewall:** allow the port. In an administrator Command Prompt:
-   `netsh advfirewall firewall add rule name="FaceFind" dir=in action=allow protocol=TCP localport=8443`
+   `netsh advfirewall firewall add rule name="FaceFind" dir=in action=allow protocol=TCP localport=8850`
    (use the port the window printed).
 2. **VLANs:** if guests are on a different VLAN than this computer, add a rule
    on your router / L3 switch / firewall that lets the guest VLAN reach this

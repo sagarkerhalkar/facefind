@@ -66,7 +66,7 @@ TRUST_PROXY = _b("TRUST_PROXY")
 import netutil  # noqa: E402
 
 HOST = os.environ.get("HOST", "0.0.0.0")        # 0.0.0.0 = reachable on the LAN
-PORT = int(os.environ.get("PORT", "8443"))      # if busy, the next free port is used
+PORT = int(os.environ.get("PORT", "8850"))      # if busy, the next free port is used
 HTTPS = _b("HTTPS", "1")                        # built-in HTTPS for the LAN
 TLS_NAMES = os.environ.get("TLS_NAMES", "").split(",")   # extra names for the certificate
 TLS_DIR = DATA_DIR / "tls"
