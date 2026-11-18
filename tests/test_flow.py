@@ -862,4 +862,22 @@ assert _txt.startswith("@echo off\r\n") and "run-server.bat" in _txt and str(ins
 assert open("install-service.bat", "rb").read().count(b"\r\n") >= 4 and open("run-server.bat", "rb").read().count(b"\r\n") >= 8          # CRLF, or Windows cannot run it
 assert b"pause" not in open("run-server.bat", "rb").read() and b"pip install" not in open("run-server.bat", "rb").read()   # nothing that can wait for a key at boot
 print("ok  start-on-boot helper writes a working start-up file")
+
+import mailer as _mailer
+import smtplib as _smtplib
+_seen = {}
+class _FakeSMTP:
+    def __init__(self, host, port, **kw):
+        _seen.update(kw)
+        self.kw = kw
+    def starttls(self, **kw):
+        pass
+_orig = _smtplib.SMTP
+_smtplib.SMTP = _FakeSMTP
+try:
+    _mailer.connect("smtp.gmail.com", 587)
+finally:
+    _smtplib.SMTP = _orig
+assert _seen.get("local_hostname") == "localhost", _seen
+print("ok  mail greets the server with a fixed, safe name")
 print("ALL TESTS PASSED")

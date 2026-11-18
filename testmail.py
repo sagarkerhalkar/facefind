@@ -7,6 +7,7 @@ import ssl
 from email.message import EmailMessage
 
 import config
+import mailer
 
 ENV = config.BASE / ".env"
 
@@ -18,14 +19,8 @@ def attempt(port):
     msg["From"] = config.MAIL_FROM or config.SMTP_USER
     msg["To"] = config.SMTP_USER
     msg.set_content("If you can read this, the OTP mails will be delivered too.")
-    ctx = ssl.create_default_context()
     try:
-        if port == 465:
-            s = smtplib.SMTP_SSL(config.SMTP_HOST, 465, context=ctx, timeout=20)
-        else:
-            s = smtplib.SMTP(config.SMTP_HOST, port, timeout=20)
-            s.starttls(context=ctx)
-        with s:
+        with mailer.connect(config.SMTP_HOST, port) as s:
             s.login(config.SMTP_USER, config.SMTP_PASSWORD)
             s.send_message(msg)
         return ""

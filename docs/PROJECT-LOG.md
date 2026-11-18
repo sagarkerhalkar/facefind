@@ -153,3 +153,4 @@ over many drives:
    check on one real Drive folder that the scan reads photos without copying.
 4. Optional later: "Sign in with Google" instead of the key file, QR code for
    the guest link, hosting on a domain.
+| 41 | Mail fix: fixed greeting name (`localhost`) for Gmail SMTP (server dropped the connection with this PC's own name) | `mailer.connect`, testmail.py, setup.py |

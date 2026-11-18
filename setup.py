@@ -2,7 +2,6 @@
 Run again any time to change the settings:  python setup.py"""
 import getpass
 import smtplib
-import ssl
 import os
 import sys
 from pathlib import Path
@@ -56,16 +55,11 @@ def ask_password():
 def test_mail(host, port, user, password):
     """Tries the login on the given port, then on the other usual one.
     Returns (problem, port): problem is '' when a port worked."""
+    import mailer
     problem = ""
     for p in [port] + [x for x in (587, 465) if x != port]:
         try:
-            ctx = ssl.create_default_context()
-            if p == 465:
-                s = smtplib.SMTP_SSL(host, 465, context=ctx, timeout=20)
-            else:
-                s = smtplib.SMTP(host, p, timeout=20)
-                s.starttls(context=ctx)
-            with s:
+            with mailer.connect(host, p) as s:
                 s.login(user, password)
             return "", p
         except smtplib.SMTPAuthenticationError:
