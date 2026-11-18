@@ -60,7 +60,7 @@ def test_mail(host, port, user, password):
     for p in [port] + [x for x in (587, 465) if x != port]:
         try:
             with mailer.connect(host, p) as s:
-                s.login(user, password)
+                mailer.login(s, user, password)
             return "", p
         except smtplib.SMTPAuthenticationError:
             return "The mail id or app password was not accepted.", port

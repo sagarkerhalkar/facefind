@@ -880,4 +880,13 @@ finally:
     _smtplib.SMTP = _orig
 assert _seen.get("local_hostname") == "localhost", _seen
 print("ok  mail greets the server with a fixed, safe name")
+
+class _F2:
+    esmtp_features = {"auth": "LOGIN PLAIN XOAUTH2"}
+    def ehlo_or_helo_if_needed(self): pass
+    def login(self, u, p): self.used = self.esmtp_features["auth"]
+_f = _F2()
+_mailer.login(_f, "a", "b")
+assert _f.used == "PLAIN", _f.used
+print("ok  mail login tries one method so the real error shows")
 print("ALL TESTS PASSED")

@@ -21,7 +21,7 @@ def attempt(port):
     msg.set_content("If you can read this, the OTP mails will be delivered too.")
     try:
         with mailer.connect(config.SMTP_HOST, port) as s:
-            s.login(config.SMTP_USER, config.SMTP_PASSWORD)
+            mailer.login(s, config.SMTP_USER, config.SMTP_PASSWORD)
             s.send_message(msg)
         return ""
     except smtplib.SMTPAuthenticationError as e:
