@@ -3,6 +3,7 @@ Run again any time to change the settings:  python setup.py"""
 import getpass
 import smtplib
 import ssl
+import os
 import sys
 from pathlib import Path
 
@@ -152,7 +153,7 @@ def ask_mail():
 
 def ask_port():
     while True:
-        a = ask("\nPort to use", "8443")
+        a = ask("\nPort to use (8850 does not clash with other apps)", "8850")
         if not a.isdigit() or not 1024 <= int(a) <= 65000:
             print("  Type a number between 1024 and 65000.")
             continue
@@ -161,6 +162,19 @@ def ask_port():
             if not ask_yes(f"  Port {a} is busy. Use {free} instead?"):
                 continue
         return str(free)
+
+
+def ask_online():
+    """Settings for putting the app on the internet behind a Cloudflare tunnel."""
+    if not ask_yes("\nWill guests open it from the internet through a Cloudflare tunnel (a web address)?", False):
+        return dict(PUBLIC_URL="", TRUST_PROXY="0", NO_BROWSER="")
+    while True:
+        url = ask("Web address guests will use (e.g. https://facefind.yourdomain.com)").rstrip("/")
+        if url.startswith("https://") and "." in url:
+            break
+        print("  Start with https:// and use a full address, e.g. https://photos.example.com")
+    print("  In Cloudflare, point that address to this computer: type HTTP, URL 127.0.0.1:<the port above>.")
+    return dict(PUBLIC_URL=url, TRUST_PROXY="1", NO_BROWSER="1")
 
 
 def ask_networks(label):
@@ -190,9 +204,15 @@ def main():
     if ask_yes("Limit which networks / VLANs can open the app?", False):
         v["ALLOWED_NETWORKS"] = ask_networks("Networks allowed to open the app")
         v["ADMIN_NETWORKS"] = ask_networks("Networks allowed to open the ADMIN page")
-    v.update(PUBLIC_URL="", TLS_NAMES="", TRUST_PROXY="0", SESSION_HOURS="2")
+    v.update(ask_online())
+    v.update(TLS_NAMES="", SESSION_HOURS="2")
     ENV.write_text("# Written by setup.py - run 'python setup.py' to change.\n" +
                    "".join(f"{k}={val}\n" for k, val in v.items()), encoding="utf-8")
+    if os.name == "nt" and ask_yes("\nStart FaceFind by itself when this computer starts (and open its port)?", True):
+        import install_service
+        os.environ["PORT"] = v["PORT"]
+        install_service.config.PORT = int(v["PORT"])
+        install_service.install(v["PORT"])
     print("\nSaved. Starting the app ...")
     print(f"Admin page: https://{netutil.primary_ip()}:{v['PORT']}/admin\n")
 
