@@ -21,8 +21,10 @@ On Mac or Linux use `./start.sh` instead.
 **On a server that other people will use:** during setup answer *yes* to "Will guests open it
 from the internet through a Cloudflare tunnel" and type your web address; setup then writes
 `PUBLIC_URL`, `TRUST_PROXY=1` and `NO_BROWSER=1` for you. It also offers to start FaceFind by
-itself when Windows starts and to open the firewall port (run setup, or `install-service.bat`,
-as Administrator). The default port is 8850, chosen so it does not clash with other apps.
+itself when Windows starts (also after a restart or shut down, with nobody signed in; it comes back
+up if it ever stops, and writes `data\service.log`) and to open the firewall port. Windows asks for
+Administrator permission once; or run `install-service.bat` as Administrator. To remove it run
+`python install_service.py --remove`. The default port is 8850, chosen so it does not clash with other apps.
 
 ## The `.env` settings
 
