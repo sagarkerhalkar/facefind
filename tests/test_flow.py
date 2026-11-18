@@ -855,4 +855,11 @@ for _i in range(50):
 for _u in (f"http://127.0.0.1:{_pt}/x", f"https://127.0.0.1:{_pt}/x", f"http://localhost:{_pt}/x", f"https://localhost:{_pt}/x"):
     assert urllib.request.urlopen(_u, timeout=5, context=_ctx).read() == b"pong", _u
 print("ok  one port answers http and https on 127.0.0.1 and localhost")
+import install_service
+_sd = tempfile.mkdtemp(); _sp = install_service.startup_file(_sd)
+_txt = open(_sp, newline="").read()
+assert _txt.startswith("@echo off\r\n") and "run-server.bat" in _txt and str(install_service.config.BASE) in _txt
+assert open("install-service.bat", "rb").read().count(b"\r\n") >= 4 and open("run-server.bat", "rb").read().count(b"\r\n") >= 8          # CRLF, or Windows cannot run it
+assert b"pause" not in open("run-server.bat", "rb").read() and b"pip install" not in open("run-server.bat", "rb").read()   # nothing that can wait for a key at boot
+print("ok  start-on-boot helper writes a working start-up file")
 print("ALL TESTS PASSED")
