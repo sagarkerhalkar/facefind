@@ -38,12 +38,21 @@ def connect(host, port, timeout=20):
     return s
 
 
+def login(s, user, password):
+    """Logs in with AUTH PLAIN only. When Gmail refuses the password, Python
+    normally tries a second method and Gmail then hangs up, which hides the
+    real reason as 'Connection unexpectedly closed'. One try shows the truth."""
+    s.ehlo_or_helo_if_needed()
+    s.esmtp_features["auth"] = "PLAIN"
+    s.login(user, password)
+
+
 def send_smtp(to, subject, text):
     msg = EmailMessage()
     msg["Subject"], msg["From"], msg["To"] = subject, config.MAIL_FROM, to
     msg.set_content(text)
     with connect(config.SMTP_HOST, config.SMTP_PORT) as s:
-        s.login(config.SMTP_USER, config.SMTP_PASSWORD)
+        login(s, config.SMTP_USER, config.SMTP_PASSWORD)
         s.send_message(msg)
 
 
