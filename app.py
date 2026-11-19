@@ -878,7 +878,7 @@ def with_logo(c, row):
             or not brand.LOGO.exists():
         return None
     try:
-        out = brand.stamp(photo_bytes(row), ext)
+        out = brand.stamp(photo_bytes(row), ext, brand.stamp_options(c))
     except (OSError, gdrive.DriveError, HTTPException):
         return None
     return (out, Path(name).stem + ".jpg") if out else None
@@ -1320,7 +1320,8 @@ def admin_brand():
     rows = [dict(r, image=brand.promo_image(r["id"]).exists())
             for r in c.execute("SELECT * FROM promos ORDER BY id DESC LIMIT 100")]
     return admin_page("brand", promo_rows=rows, accent=brand.get(c, "accent"),
-                      tagline=brand.get(c, "tagline"), stamp=brand.get(c, "stamp") == "1")
+                      tagline=brand.get(c, "tagline"), stamp=brand.get(c, "stamp") == "1",
+                      sopts=brand.stamp_options(c))
 
 
 @app.post("/admin/brand")
@@ -1336,6 +1337,11 @@ def admin_brand_save():
     if brand.COLOUR_RE.fullmatch(f.get("accent", "")):
         brand.put(c, "accent", f["accent"])
     brand.put(c, "stamp", "1" if f.get("stamp") else "0")
+    for key, lo, hi in (("stamp_opacity", 5, 100), ("stamp_size", 3, 30)):
+        if f.get(key, "").strip().isdigit():
+            brand.put(c, key, str(max(lo, min(hi, int(f[key])))))
+    if f.get("stamp_corner") in brand.CORNERS:
+        brand.put(c, "stamp_corner", f["stamp_corner"])
     for field, dest, side in (("logo", brand.LOGO, 600), ("background", None, 0)):
         if f.get("remove_" + field):
             if dest:

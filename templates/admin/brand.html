@@ -19,6 +19,20 @@
 <input id="background" name="background" type="file" accept="image/*"></div>
 </div>
 <label class="check"><input type="checkbox" name="stamp" {{ 'checked' if stamp }}><span>Put the logo, small, in the top right corner of every downloaded photo. JPG, PNG, WEBP and TIFF are sent as JPG with the logo; iPhone HEIC photos get the logo too. Camera RAW files (ARW, CR2, NEF ...) are sent unchanged, because turning them into JPG would lose the RAW.</span></label>
+<fieldset class="stampset"><legend>Logo on downloaded photos</legend>
+<div class="row">
+<div><label for="sop">Strength: <output id="sopv">{{ sopts.opacity }}</output>%</label>
+<input id="sop" name="stamp_opacity" type="range" min="5" max="100" step="5" value="{{ sopts.opacity }}" data-stamp="opacity">
+<p class="hint">100 = solid logo. Lower numbers make it fainter, so it covers less of the photo.</p></div>
+<div><label for="ssz">Size: <output id="sszv">{{ sopts.size }}</output>%</label>
+<input id="ssz" name="stamp_size" type="range" min="3" max="30" step="1" value="{{ sopts.size }}" data-stamp="size">
+<p class="hint">Logo width as a percent of the photo's longer side.</p></div>
+<div><label for="scr">Place</label><select id="scr" name="stamp_corner" data-stamp="corner">
+{% for k, n in (("tr", "Top right"), ("tl", "Top left"), ("br", "Bottom right"), ("bl", "Bottom left"), ("c", "Centre")) %}<option value="{{ k }}" {{ 'selected' if sopts.corner == k }}>{{ n }}</option>{% endfor %}</select></div>
+</div>
+{% if studio.logo %}<div class="stampdemo" data-corner="{{ sopts.corner }}"><img src="{{ url_for('brand_logo') }}?v={{ studio.v }}" alt="Logo preview"></div>
+<p class="hint">The picture above shows roughly how the logo will look on a photo. Save to apply it to new downloads.</p>{% endif %}
+</fieldset>
 <button type="submit">Save look</button>
 </form>
 

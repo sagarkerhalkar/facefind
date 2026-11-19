@@ -268,3 +268,7 @@ sometimes only the phone company's city). The Excel file has the same Place colu
 - **Sign-in picture** (Admin, Look): the whole picture is the sign-in page background (never cropped; on phones it sits at the top). It is not shown after the guest signs in. A cut-out PNG with a see-through background looks best; any other picture has its empty margin trimmed.
 - **Logo**: a logo saved on a plain (for example white) background is made transparent, so it does not show as a box on downloaded photos. Logos already saved are fixed too, when used.
 - **Download record**: click a preview to open the photo on the same page; use the arrows or the Left/Right keys for the next or previous photo, Esc to close.
+
+## Logo strength on downloads
+
+Admin, Look, "Logo on downloaded photos": **Strength** (5-100, lower = fainter), **Size** (percent of the photo's long side) and **Place** (four corners or centre). A small preview shows the effect; Save applies it to every new download. Photos already downloaded do not change.
