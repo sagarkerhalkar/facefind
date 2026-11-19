@@ -8,7 +8,7 @@ import io
 import re
 import secrets
 
-from PIL import Image, ImageChops, ImageDraw, ImageOps
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageOps
 
 import config
 import db
@@ -110,6 +110,7 @@ def clear_background(im):
         lambda v: 0 if v == 0 else 255)                   # 0 where the background was reached
     if gone.getextrema()[1] == 0 or sum(gone.histogram()[255:]) < 0.02 * im.width * im.height:
         return im                                         # nothing but background: leave it as it is
+    gone = gone.filter(ImageFilter.MinFilter(3)).filter(ImageFilter.GaussianBlur(0.6))   # no light fringe
     im.putalpha(gone)
     return im
 
@@ -144,17 +145,6 @@ def logo_png():
     out = io.BytesIO()
     logo_image().save(out, "PNG")
     return out.getvalue()
-
-
-@functools.lru_cache(maxsize=2)
-def _bg_colour(stamp):
-    px = Image.open(BACKGROUND).convert("RGB").getpixel((0, 0))
-    return "#%02x%02x%02x" % px
-
-
-def background_colour():
-    """The colour of the picture's own edge, used to fill the frame around it."""
-    return _bg_colour(BACKGROUND.stat().st_mtime_ns) if BACKGROUND.exists() else "#0a1020"
 
 
 def save_background(upload):
@@ -194,6 +184,19 @@ def background_file():
 
 def has_transparent_background():
     return BACKGROUND_PNG.exists()
+
+
+@functools.lru_cache(maxsize=2)
+def _ratio(stamp):
+    f, _ = background_file()
+    with Image.open(f) as im:
+        return round(im.height / im.width, 3)
+
+
+def background_ratio():
+    """Height divided by width of the sign-in picture (phones leave room for it)."""
+    f, _ = background_file()
+    return _ratio(f.stat().st_mtime_ns) if f else 0.7
 
 
 def version():

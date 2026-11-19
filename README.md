@@ -265,6 +265,6 @@ sometimes only the phone company's city). The Excel file has the same Place colu
 
 ## Sign-in picture, logo and the photo viewer
 
-- **Sign-in picture** (Admin, Look): shown whole on the sign-in page, never cropped, and never after the guest has signed in. A cut-out PNG with a see-through background floats on the page; any other picture has its empty margin trimmed.
+- **Sign-in picture** (Admin, Look): the whole picture is the sign-in page background (never cropped; on phones it sits at the top). It is not shown after the guest signs in. A cut-out PNG with a see-through background looks best; any other picture has its empty margin trimmed.
 - **Logo**: a logo saved on a plain (for example white) background is made transparent, so it does not show as a box on downloaded photos. Logos already saved are fixed too, when used.
 - **Download record**: click a preview to open the photo on the same page; use the arrows or the Left/Right keys for the next or previous photo, Esc to close.

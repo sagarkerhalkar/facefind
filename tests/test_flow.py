@@ -549,8 +549,8 @@ sv = adm.post("/admin/brand", data={"csrf": csrf, "brand": "Kerhalkar Studio", "
 assert sv.status_code == 302 and config.BRAND == "Kerhalkar Studio" and B.LOGO.exists() and B.BACKGROUND.exists()
 pub = A.app.test_client()
 assert pub.get("/brand/logo").mimetype == "image/png" and pub.get("/brand/background").mimetype == "image/jpeg"
-css = pub.get("/brand/theme.css").get_data(as_text=True); assert "--accent:#0A7E8C" in css and ".heroart{background-color:#090909" in css and "url(/brand/background" not in css
-hp = pub.get("/").get_data(as_text=True); assert "Hello guests" in hp and "/brand/logo" in hp and "Kerhalkar Studio" in hp and 'class="heroart"' in hp
+css = pub.get("/brand/theme.css").get_data(as_text=True); assert "--accent:#0A7E8C" in css and ".backdrop{background-image:url(/brand/background" in css
+hp = pub.get("/").get_data(as_text=True); assert "Hello guests" in hp and "/brand/logo" in hp and "Kerhalkar Studio" in hp
 assert adm.post("/admin/brand", data={"csrf": csrf, "brand": "Kerhalkar Studio", "stamp": "on", "accent": "#0A7E8C", "logo": (io.BytesIO(b"not a picture"), "a.png")},
                 content_type="multipart/form-data", follow_redirects=True).data.count(b"not a picture") == 1
 assert A.app.test_client().post("/admin/brand", data={"brand": "Hack"}).status_code == 403
@@ -580,6 +580,12 @@ _tmp = _b.BRAND_DIR / "t.png"
 _b.save_image(_Up(), _tmp, 600)
 assert _I.open(_tmp).convert("RGBA").getpixel((2, 2))[3] == 0
 _tmp.unlink()
+# any single-colour logo background goes, also a coloured one and a JPEG with noise
+_bl = _I.new("RGB", (240, 120), (30, 60, 200)); _D.Draw(_bl).ellipse((80, 20, 160, 100), fill=(255, 255, 255))
+_cl2 = _b.clear_background(_bl.convert("RGBA"))
+assert _cl2.getpixel((3, 3))[3] == 0 and _cl2.getpixel((120, 60))[3] == 255          # the white inside stays
+_jb = io.BytesIO(); _bl.save(_jb, "JPEG", quality=70); _jb.seek(0)
+_jl = _b.clear_background(_I.open(_jb).convert("RGBA")); assert _jl.getpixel((3, 3))[3] == 0 and _jl.getpixel((120, 60))[3] == 255
 print("ok  logo is made transparent; background picture margins are trimmed")
 # a cut-out picture (see-through background) is kept see-through and shown without a frame
 _cut = _I.new("RGBA", (400, 300), (0, 0, 0, 0)); _D.Draw(_cut).ellipse((120, 60, 280, 240), fill=(200, 50, 50, 255))
@@ -590,7 +596,6 @@ _b.save_background(_Up2())
 assert _b.has_transparent_background() and not _b.BACKGROUND.exists()
 _im = _I.open(_b.BACKGROUND_PNG); assert _im.mode == "RGBA" and _im.getpixel((0, 0))[3] == 0 and _im.size[0] < 200, _im.size
 assert pub.get("/brand/background").mimetype == "image/png"
-assert "background:none" in pub.get("/brand/theme.css").get_data(as_text=True)
 _b.remove_background()
 assert pub.get("/brand/background").status_code == 404
 print("ok  see-through background picture stays see-through")

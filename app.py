@@ -435,10 +435,9 @@ def brand_theme():
     c = con()
     accent = brand.get(c, "accent")
     css = f":root{{--accent:{accent};--accent-ink:{_ink_for(accent)};}}\n"
-    if brand.has_transparent_background():  # a cut-out floats on the page, no frame
-        css += ".heroart{background:none;box-shadow:none;border-radius:0;overflow:visible;}\n"
-    elif brand.BACKGROUND.exists():         # shown whole, in a frame of its own edge colour
-        css += f".heroart{{background-color:{brand.background_colour()};}}\n"
+    if brand.background_file()[0]:          # the whole picture behind the sign-in page, never cropped
+        css += (f":root{{--bgr:{brand.background_ratio()};}}\n"
+                f".backdrop{{background-image:url(/brand/background?v={brand.version()});}}\n")
     return app.response_class(css, mimetype="text/css")
 
 
