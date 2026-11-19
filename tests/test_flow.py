@@ -599,6 +599,24 @@ assert pub.get("/brand/background").mimetype == "image/png"
 _b.remove_background()
 assert pub.get("/brand/background").status_code == 404
 print("ok  see-through background picture stays see-through")
+# the logo on a download: strength, size and place come from the owner's choice
+_keep_logo = _b.LOGO.read_bytes() if _b.LOGO.exists() else None
+_bs = _I.new("RGB", (1000, 700), (20, 20, 20))
+_lg = _I.new("RGBA", (100, 100), (255, 255, 255, 255)); _lg.save(_b.LOGO, "PNG")
+_b._logo.cache_clear()
+_full = _b.add_logo(_bs.copy(), dict(opacity=100, size=10, corner="br")); _half = _b.add_logo(_bs.copy(), dict(opacity=50, size=10, corner="br"))
+assert _full.getpixel((960, 660))[0] == 255 and 120 < _half.getpixel((960, 660))[0] < 140, (_full.getpixel((960, 660)), _half.getpixel((960, 660)))
+assert _b.add_logo(_bs.copy(), dict(opacity=100, size=10, corner="c")).getpixel((500, 350))[0] == 255
+assert adm.post("/admin/brand", data={"csrf": csrf, "brand": "Test Studio", "accent": "#E8A317", "stamp": "on",
+                                      "stamp_opacity": "40", "stamp_size": "99", "stamp_corner": "bl"}).status_code == 302
+_o = _b.stamp_options(con); assert _o == dict(opacity=40, size=30, corner="bl"), _o
+assert 'value="40"' in adm.get("/admin/brand").get_data(as_text=True)
+adm.post("/admin/brand", data={"csrf": csrf, "brand": "Test Studio", "accent": "#E8A317"})
+_b.LOGO.unlink(missing_ok=True)
+if _keep_logo: _b.LOGO.write_bytes(_keep_logo)
+_b._logo.cache_clear()
+print("ok  logo strength, size and place are set by the owner")
+
 
 
 

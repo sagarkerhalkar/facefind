@@ -290,6 +290,21 @@
   document.addEventListener("close", (e) => { if (e.target.id === "tester") stopCam(); }, true);
 
 
+
+  // ------------------------------------------------------------------ logo strength preview (Look page)
+  function stampPreview() {
+    const demo = $(".stampdemo"); if (!demo) return;
+    const img = $("img", demo), op = $("#sop"), sz = $("#ssz"), cr = $("#scr");
+    if (!op || !sz || !cr) return;
+    img.style.opacity = op.value / 100;
+    img.style.width = (sz.value * 0.9 * 1.0) + "%";              // the preview box is wider than tall, so scale a little
+    demo.dataset.corner = cr.value;
+    $("#sopv").textContent = op.value; $("#sszv").textContent = sz.value;
+  }
+  document.addEventListener("input", (e) => { if (e.target.matches("[data-stamp]")) stampPreview(); });
+  document.addEventListener("change", (e) => { if (e.target.matches("[data-stamp]")) stampPreview(); });
+  stampPreview();
+
   // ------------------------------------------------------------------ photo viewer (download record)
   const lb = { box: null, items: [], i: 0 };
   function lbBuild() {
@@ -438,6 +453,7 @@
 
   // ------------------------------------------------------------------ every page, after it appears
   function boot() {
+    stampPreview();
     $$(".progress i[data-pct]").forEach((i) => { i.style.width = Math.max(+i.dataset.pct, 2) + "%"; });
     const f = $("#flash");
     if (f && f.dataset.msg && !boot.first) { toast(f.dataset.msg, bad(f.dataset.msg) ? "bad" : ""); }

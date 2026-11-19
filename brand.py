@@ -22,6 +22,9 @@ DEFAULTS = {
     "tagline": "Every photo you are in, found with one selfie.",
     "accent": "#E8A317",          # marigold
     "stamp": "1",                 # 1 = put the logo on downloaded photos (default ON)
+    "stamp_opacity": "100",       # 5-100: how strongly the logo shows on a downloaded photo
+    "stamp_size": "9",            # 3-30: logo width as a percent of the photo's long side
+    "stamp_corner": "tr",         # tl, tr, bl, br or c (centre)
     "scan_side": str(config.SCAN_SIDE),
     "look_first": "1",            # 1 = guests may see previews before signing in
 }
@@ -204,17 +207,38 @@ def version():
     return str(int(max([f.stat().st_mtime for f in (LOGO, BACKGROUND, BACKGROUND_PNG) if f.exists()] or [0])))
 
 
-def add_logo(im):
-    """Puts the studio logo, small, in the top right corner of a picture."""
+CORNERS = ("tl", "tr", "bl", "br", "c")
+
+
+def stamp_options(c):
+    """The owner's choice for the logo on downloaded photos."""
+    def num(key, lo, hi):
+        try:
+            return max(lo, min(hi, int(get(c, key))))
+        except (TypeError, ValueError):
+            return int(DEFAULTS[key])
+    corner = get(c, "stamp_corner")
+    return dict(opacity=num("stamp_opacity", 5, 100), size=num("stamp_size", 3, 30),
+                corner=corner if corner in CORNERS else "tr")
+
+
+def add_logo(im, opts=None):
+    """Puts the studio logo on a picture (default: small, top right, full strength)."""
+    opts = opts or dict(opacity=100, size=9, corner="tr")
     logo = logo_image()
-    width = max(48, int(max(im.size) * 0.09))
+    width = max(48, int(max(im.size) * opts["size"] / 100))
     logo = logo.resize((width, max(1, round(logo.height * width / logo.width))), Image.LANCZOS)
+    if opts["opacity"] < 100:
+        logo.putalpha(logo.getchannel("A").point(lambda v: v * opts["opacity"] // 100))
     margin = max(8, int(max(im.size) * 0.018))
-    im.paste(logo, (im.width - logo.width - margin, margin), logo)
+    right, bottom = im.width - logo.width - margin, im.height - logo.height - margin
+    x, y = {"tl": (margin, margin), "tr": (right, margin), "bl": (margin, bottom),
+            "br": (right, bottom), "c": ((im.width - logo.width) // 2, (im.height - logo.height) // 2)}[opts["corner"]]
+    im.paste(logo, (x, y), logo)
     return im
 
 
-def stamp(data, ext):
+def stamp(data, ext, opts=None):
     """A downloaded photo with the studio logo, small, in the top right
     corner. Returns JPEG bytes, or None when this file type cannot be
     stamped (RAW, HEIC) or no logo is set - the original is then sent."""
@@ -226,7 +250,7 @@ def stamp(data, ext):
         im = ImageOps.exif_transpose(im)
         exif = im.getexif()
         im = im.convert("RGB")
-        add_logo(im)
+        add_logo(im, opts)
         out = io.BytesIO()
         im.save(out, "JPEG", quality=95, subsampling=0, exif=exif.tobytes(),
                 **({"icc_profile": icc} if icc else {}))

@@ -157,3 +157,4 @@ over many drives:
 | 42 | Download record: photo preview, visitor IP from Cloudflare, place (city/region/country) | app.py place(), db downloads.place, guest.html |
 | 43 | Sign-in picture shown whole (transparent PNG kept, margins trimmed); logo background made transparent; photo viewer with next/previous in the download record | brand.py, guest.html, admin.js |
 | 44 | Sign-in picture is the real page background, whole; phones show it at the top; logo clean-up works for any single-colour background | style.css, brand.py |
+| 45 | Logo on downloads: owner sets strength, size, place (Look page, live preview); phone sign-in picture stays behind the page | brand.py stamp_options, brand.html, style.css |
