@@ -51,6 +51,7 @@
     <li><svg class="ic"><use href="#g-lock"/></svg> Only you can download</li>
     <li><svg class="ic"><use href="#g-shield"/></svg> Verified by email code</li>
   </ul>
+  {% if studio.background %}<figure class="heroart"><img src="{{ url_for('brand_background') }}?v={{ studio.v }}" alt=""></figure>{% endif %}
   {{ flow(promos_before, "flow-before") }}
 </section>
 {% endif %}

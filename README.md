@@ -262,3 +262,9 @@ it works when you use the tunnel (`TRUST_PROXY=1`). The country is always known.
 in Cloudflare open your domain, Rules, Transform Rules, Managed Transforms, and switch on
 **Add visitor location headers**. The place is a guess from the IP address (usually the right city,
 sometimes only the phone company's city). The Excel file has the same Place column.
+
+## Sign-in picture, logo and the photo viewer
+
+- **Sign-in picture** (Admin, Look): shown whole on the sign-in page, never cropped, and never after the guest has signed in. A cut-out PNG with a see-through background floats on the page; any other picture has its empty margin trimmed.
+- **Logo**: a logo saved on a plain (for example white) background is made transparent, so it does not show as a box on downloaded photos. Logos already saved are fixed too, when used.
+- **Download record**: click a preview to open the photo on the same page; use the arrows or the Left/Right keys for the next or previous photo, Esc to close.

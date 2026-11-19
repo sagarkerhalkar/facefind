@@ -289,6 +289,52 @@
   });
   document.addEventListener("close", (e) => { if (e.target.id === "tester") stopCam(); }, true);
 
+
+  // ------------------------------------------------------------------ photo viewer (download record)
+  const lb = { box: null, items: [], i: 0 };
+  function lbBuild() {
+    if (lb.box) return lb.box;
+    const d = document.createElement("div");
+    d.className = "lb"; d.hidden = true; d.setAttribute("role", "dialog"); d.setAttribute("aria-label", "Photo viewer");
+    d.innerHTML = '<span class="lbc"></span><button type="button" class="lbx" aria-label="Close">&times;</button>' +
+      '<button type="button" class="lbp" aria-label="Previous photo">&#8249;</button>' +
+      '<img alt=""><div class="lbcap"></div>' +
+      '<button type="button" class="lbn" aria-label="Next photo">&#8250;</button>';
+    document.body.append(d); lb.box = d; return d;
+  }
+  function lbShow(n) {
+    const d = lbBuild(), it = lb.items[n]; if (!it) return;
+    lb.i = n;
+    const img = $("img", d);
+    img.alt = "Downloaded photo";
+    img.src = it.href;
+    $(".lbcap", d).textContent = it.cap;
+    $(".lbc", d).textContent = (n + 1) + " of " + lb.items.length;
+    $(".lbp", d).hidden = n === 0; $(".lbn", d).hidden = n === lb.items.length - 1;
+    const nx = lb.items[n + 1]; if (nx) new Image().src = nx.href;       // next one is ready before it is asked for
+    d.hidden = false;
+  }
+  function lbClose() { if (lb.box) { lb.box.hidden = true; $("img", lb.box).removeAttribute("src"); } }
+  document.addEventListener("click", (e) => {
+    const a = e.target.closest("a.dlview");
+    if (a) {
+      e.preventDefault();
+      lb.items = $$("a.dlview").map((x) => ({ href: x.href, cap: x.dataset.cap || "" }));
+      lbShow(Math.max(0, $$("a.dlview").indexOf(a)));
+      return;
+    }
+    if (!lb.box || lb.box.hidden) return;
+    if (e.target.closest(".lbp")) lbShow(lb.i - 1);
+    else if (e.target.closest(".lbn")) lbShow(lb.i + 1);
+    else if (e.target.closest(".lbx") || e.target === lb.box) lbClose();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (!lb.box || lb.box.hidden) return;
+    if (e.key === "Escape") lbClose();
+    else if (e.key === "ArrowLeft") lbShow(lb.i - 1);
+    else if (e.key === "ArrowRight") lbShow(lb.i + 1);
+  });
+
   // ------------------------------------------------------------------ live album cards
   let pollTimer = null;
   const LABEL = { running: "Scanning", ready: "Ready", failed: "Failed", empty: "Not scanned" };

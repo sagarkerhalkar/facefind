@@ -421,7 +421,7 @@ def _studio():
     c = con()
     return dict(brand=config.BRAND, static_v=_static_v, studio=dict(
         tagline=brand.get(c, "tagline"), logo=brand.LOGO.exists(),
-        background=brand.BACKGROUND.exists(), v=brand.version() + brand.get(c, "accent")[1:]))
+        background=brand.background_file()[0] is not None, v=brand.version() + brand.get(c, "accent")[1:]))
 
 
 def _ink_for(colour):
@@ -435,11 +435,10 @@ def brand_theme():
     c = con()
     accent = brand.get(c, "accent")
     css = f":root{{--accent:{accent};--accent-ink:{_ink_for(accent)};}}\n"
-    if brand.BACKGROUND.exists():
-        url = f"url(/brand/background?v={brand.version()})"
-        css += (f".backdrop{{background-image:{url};}}\n"
-                f".login-wrap{{background-image:linear-gradient(rgba(13,11,26,.72),rgba(13,11,26,.72)),{url};"
-                "background-size:cover;background-position:center;}}\n")
+    if brand.has_transparent_background():  # a cut-out floats on the page, no frame
+        css += ".heroart{background:none;box-shadow:none;border-radius:0;overflow:visible;}\n"
+    elif brand.BACKGROUND.exists():         # shown whole, in a frame of its own edge colour
+        css += f".heroart{{background-color:{brand.background_colour()};}}\n"
     return app.response_class(css, mimetype="text/css")
 
 
@@ -447,14 +446,16 @@ def brand_theme():
 def brand_logo():
     if not brand.LOGO.exists():
         abort(404)
-    return send_file(brand.LOGO, mimetype="image/png")
+    return app.response_class(brand.logo_png(), mimetype="image/png",
+                              headers={"Cache-Control": "public, max-age=86400"})
 
 
 @app.get("/brand/background")
 def brand_background():
-    if not brand.BACKGROUND.exists():
+    f, mime = brand.background_file()
+    if not f:
         abort(404)
-    return send_file(brand.BACKGROUND, mimetype="image/jpeg")
+    return send_file(f, mimetype=mime)
 
 
 @app.get("/brand/promo/<int:pid>")
@@ -1336,13 +1337,19 @@ def admin_brand_save():
     if brand.COLOUR_RE.fullmatch(f.get("accent", "")):
         brand.put(c, "accent", f["accent"])
     brand.put(c, "stamp", "1" if f.get("stamp") else "0")
-    for field, dest, side in (("logo", brand.LOGO, 600), ("background", brand.BACKGROUND, 2400)):
+    for field, dest, side in (("logo", brand.LOGO, 600), ("background", None, 0)):
         if f.get("remove_" + field):
-            dest.unlink(missing_ok=True)
+            if dest:
+                dest.unlink(missing_ok=True)
+            else:
+                brand.remove_background()
         up = request.files.get(field)
         if up and up.filename:
             try:
-                brand.save_image(up, dest, side)
+                if dest:
+                    brand.save_image(up, dest, side)
+                else:
+                    brand.save_background(up)
             except ValueError as e:
                 notes.append(f"{field.capitalize()}: {e}")
     if f.get("stamp") and not brand.LOGO.exists():
