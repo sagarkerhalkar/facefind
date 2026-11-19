@@ -19,7 +19,7 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v={{ static_v('style.css') }}">
 <link rel="stylesheet" href="{{ url_for('brand_theme') }}?v={{ studio.v }}">
 </head>
-<body class="guest" data-step="0">
+<body class="guest{{ ' has-bg' if studio.background }}" data-step="0">
 <svg class="hid" width="0" height="0" aria-hidden="true"><defs>
 <symbol id="g-camera" viewBox="0 0 24 24"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></symbol>
 <symbol id="g-lock" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></symbol>
@@ -51,7 +51,6 @@
     <li><svg class="ic"><use href="#g-lock"/></svg> Only you can download</li>
     <li><svg class="ic"><use href="#g-shield"/></svg> Verified by email code</li>
   </ul>
-  {% if studio.background %}<figure class="heroart"><img src="{{ url_for('brand_background') }}?v={{ studio.v }}" alt=""></figure>{% endif %}
   {{ flow(promos_before, "flow-before") }}
 </section>
 {% endif %}
