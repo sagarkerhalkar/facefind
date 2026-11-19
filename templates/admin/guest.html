@@ -12,7 +12,7 @@
 {% if albums %}<p class="hint">{% for a in albums %}{{ a.name }}: {{ a.n }}{{ ", " if not loop.last }}{% endfor %}</p>{% endif %}
 <a class="btn ghost small" href="{{ url_for('admin_downloads_csv', email=u.email) }}">Excel file for this guest</a></div>
 <div class="card">{% if files %}<div class="scroll"><table><tr><th>Preview</th><th>Time</th><th>Album</th><th>Photo</th><th>Place</th><th>IP</th></tr>
-{% for f in files %}<tr><td><a href="{{ url_for('admin_photo', pid=f.photo_id) }}" target="_blank" rel="noopener"><img class="dlthumb" src="{{ url_for('admin_photo', pid=f.photo_id) }}" loading="lazy" alt="Photo"></a></td><td>{{ fmt(f.ts) }}</td><td>{{ f.album }}</td><td>{{ f.relpath }}</td><td>{{ f.place or "-" }}</td><td>{{ f.ip }}</td></tr>{% endfor %}
+{% for f in files %}<tr><td><a class="dlview" href="{{ url_for('admin_photo', pid=f.photo_id) }}" data-cap="{{ f.album }} - {{ f.relpath }} - {{ fmt(f.ts) }}{{ ' - ' ~ f.place if f.place }}"><img class="dlthumb" src="{{ url_for('admin_photo', pid=f.photo_id) }}" loading="lazy" alt="Photo"></a></td><td>{{ fmt(f.ts) }}</td><td>{{ f.album }}</td><td>{{ f.relpath }}</td><td>{{ f.place or "-" }}</td><td>{{ f.ip }}</td></tr>{% endfor %}
 </table></div>{% else %}<p>This guest has not downloaded a photo yet.</p>{% endif %}</div>
 {% if pages > 1 %}<nav class="pager" aria-label="Pages">
 {% if page_no > 1 %}<a class="btn ghost small" href="{{ url_for('admin_guest', email=u.email, page=page_no-1) }}">Previous</a>{% endif %}

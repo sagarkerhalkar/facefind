@@ -155,3 +155,4 @@ over many drives:
    the guest link, hosting on a domain.
 | 41 | Mail fix: fixed greeting name (`localhost`) for Gmail SMTP (server dropped the connection with this PC's own name) | `mailer.connect`, testmail.py, setup.py |
 | 42 | Download record: photo preview, visitor IP from Cloudflare, place (city/region/country) | app.py place(), db downloads.place, guest.html |
+| 43 | Sign-in picture shown whole (transparent PNG kept, margins trimmed); logo background made transparent; photo viewer with next/previous in the download record | brand.py, guest.html, admin.js |

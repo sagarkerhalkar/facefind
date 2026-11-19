@@ -2,12 +2,13 @@
 logo, sign-in background, the logo put on downloaded photos, promotions,
 and staff passwords."""
 import hashlib
+import functools
 import hmac
 import io
 import re
 import secrets
 
-from PIL import Image, ImageOps
+from PIL import Image, ImageChops, ImageDraw, ImageOps
 
 import config
 import db
@@ -15,6 +16,7 @@ import db
 BRAND_DIR = config.DATA_DIR / "brand"
 BRAND_DIR.mkdir(parents=True, exist_ok=True)
 LOGO, BACKGROUND = BRAND_DIR / "logo.png", BRAND_DIR / "background.jpg"
+BACKGROUND_PNG = BRAND_DIR / "background.png"       # used when the picture has a see-through background
 DEFAULTS = {
     "brand": config.BRAND,
     "tagline": "Every photo you are in, found with one selfie.",
@@ -73,19 +75,135 @@ def save_image(upload, dest, max_side):
         raise ValueError("That file is not a picture. Use JPG, PNG or WEBP.")
     im.thumbnail((max_side, max_side))
     if dest.suffix == ".png":
-        im.convert("RGBA").save(dest, "PNG", optimize=True)
+        im = clear_background(im.convert("RGBA"))        # a logo must be see-through
+        im.save(dest, "PNG", optimize=True)
     else:
-        im.convert("RGB").save(dest, "JPEG", quality=88)
+        im = im.convert("RGB")
+        im.save(dest, "JPEG", quality=90)
+
+
+def _corners(im):
+    w, h = im.size
+    return [im.getpixel(p) for p in ((0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1))]
+
+
+def _alike(colours, tol):
+    return all(max(abs(a - b) for a, b in zip(c[:3], colours[0][:3])) <= tol for c in colours)
+
+
+def clear_background(im):
+    """A logo saved on a white (or any one-colour) background gets that
+    background made transparent, so it does not show as a box on photos.
+    Pictures that already have transparency are left alone."""
+    im = im.convert("RGBA")
+    corners = _corners(im)
+    if any(c[3] < 250 for c in corners) or not _alike(corners, 18):
+        return im
+    if im.getchannel("A").getextrema()[0] < 250:
+        return im
+    marker = (1, 2, 3)
+    flooded = im.convert("RGB")
+    for p in ((0, 0), (im.width - 1, 0), (0, im.height - 1), (im.width - 1, im.height - 1)):
+        if flooded.getpixel(p) != marker:
+            ImageDraw.floodfill(flooded, p, marker, thresh=40)
+    gone = ImageChops.difference(flooded, Image.new("RGB", im.size, marker)).convert("L").point(
+        lambda v: 0 if v == 0 else 255)                   # 0 where the background was reached
+    if gone.getextrema()[1] == 0 or sum(gone.histogram()[255:]) < 0.02 * im.width * im.height:
+        return im                                         # nothing but background: leave it as it is
+    im.putalpha(gone)
+    return im
+
+
+def trim_border(im, tol=24):
+    """Cuts away an even-coloured margin (for example white) around a picture."""
+    im = im.convert("RGB")
+    corners = _corners(im)
+    if not _alike(corners, 18):
+        return im
+    diff = ImageChops.difference(im, Image.new("RGB", im.size, corners[0])).convert("L")
+    box = diff.point(lambda v: 255 if v > tol else 0).getbbox()
+    if not box:
+        return im
+    pad = max(8, int(max(im.size) * 0.02))
+    box = (max(0, box[0] - pad), max(0, box[1] - pad),
+           min(im.width, box[2] + pad), min(im.height, box[3] + pad))
+    return im.crop(box)
+
+
+@functools.lru_cache(maxsize=2)
+def _logo(stamp):
+    return clear_background(Image.open(LOGO).convert("RGBA"))
+
+
+def logo_image():
+    """The logo as a transparent picture (also for logos saved before this existed)."""
+    return _logo(LOGO.stat().st_mtime_ns).copy()
+
+
+def logo_png():
+    out = io.BytesIO()
+    logo_image().save(out, "PNG")
+    return out.getvalue()
+
+
+@functools.lru_cache(maxsize=2)
+def _bg_colour(stamp):
+    px = Image.open(BACKGROUND).convert("RGB").getpixel((0, 0))
+    return "#%02x%02x%02x" % px
+
+
+def background_colour():
+    """The colour of the picture's own edge, used to fill the frame around it."""
+    return _bg_colour(BACKGROUND.stat().st_mtime_ns) if BACKGROUND.exists() else "#0a1020"
+
+
+def save_background(upload):
+    """The sign-in picture. A cut-out with a see-through background stays
+    see-through (PNG); any other picture loses its empty margin (JPG)."""
+    data = upload.read(12 * 1024 * 1024 + 1)
+    if not data or len(data) > 12 * 1024 * 1024:
+        raise ValueError("Choose a picture smaller than 12 MB.")
+    try:
+        im = ImageOps.exif_transpose(Image.open(io.BytesIO(data)))
+        im.load()
+    except Exception:
+        raise ValueError("That file is not a picture. Use JPG, PNG or WEBP.")
+    im.thumbnail((1800, 1800))
+    rgba = im.convert("RGBA")
+    clear = rgba.getchannel("A").getextrema()[0] < 250
+    remove_background()
+    if clear:
+        box = rgba.getchannel("A").point(lambda v: 255 if v > 8 else 0).getbbox()
+        (rgba.crop(box) if box else rgba).save(BACKGROUND_PNG, "PNG", optimize=True)
+    else:
+        trim_border(im.convert("RGB")).save(BACKGROUND, "JPEG", quality=90)
+
+
+def remove_background():
+    for f in (BACKGROUND, BACKGROUND_PNG):
+        f.unlink(missing_ok=True)
+
+
+def background_file():
+    """The stored sign-in picture and its type, or (None, None)."""
+    for f, mime in ((BACKGROUND_PNG, "image/png"), (BACKGROUND, "image/jpeg")):
+        if f.exists():
+            return f, mime
+    return None, None
+
+
+def has_transparent_background():
+    return BACKGROUND_PNG.exists()
 
 
 def version():
     """Changes when a brand picture changes, so browsers fetch the new one."""
-    return str(int(max([f.stat().st_mtime for f in (LOGO, BACKGROUND) if f.exists()] or [0])))
+    return str(int(max([f.stat().st_mtime for f in (LOGO, BACKGROUND, BACKGROUND_PNG) if f.exists()] or [0])))
 
 
 def add_logo(im):
     """Puts the studio logo, small, in the top right corner of a picture."""
-    logo = Image.open(LOGO).convert("RGBA")
+    logo = logo_image()
     width = max(48, int(max(im.size) * 0.09))
     logo = logo.resize((width, max(1, round(logo.height * width / logo.width))), Image.LANCZOS)
     margin = max(8, int(max(im.size) * 0.018))

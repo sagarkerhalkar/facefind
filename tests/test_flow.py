@@ -549,8 +549,8 @@ sv = adm.post("/admin/brand", data={"csrf": csrf, "brand": "Kerhalkar Studio", "
 assert sv.status_code == 302 and config.BRAND == "Kerhalkar Studio" and B.LOGO.exists() and B.BACKGROUND.exists()
 pub = A.app.test_client()
 assert pub.get("/brand/logo").mimetype == "image/png" and pub.get("/brand/background").mimetype == "image/jpeg"
-css = pub.get("/brand/theme.css").get_data(as_text=True); assert "--accent:#0A7E8C" in css and "/brand/background" in css
-hp = pub.get("/").get_data(as_text=True); assert "Hello guests" in hp and "/brand/logo" in hp and "Kerhalkar Studio" in hp
+css = pub.get("/brand/theme.css").get_data(as_text=True); assert "--accent:#0A7E8C" in css and ".heroart{background-color:#090909" in css and "url(/brand/background" not in css
+hp = pub.get("/").get_data(as_text=True); assert "Hello guests" in hp and "/brand/logo" in hp and "Kerhalkar Studio" in hp and 'class="heroart"' in hp
 assert adm.post("/admin/brand", data={"csrf": csrf, "brand": "Kerhalkar Studio", "stamp": "on", "accent": "#0A7E8C", "logo": (io.BytesIO(b"not a picture"), "a.png")},
                 content_type="multipart/form-data", follow_redirects=True).data.count(b"not a picture") == 1
 assert A.app.test_client().post("/admin/brand", data={"brand": "Hack"}).status_code == 403
@@ -563,6 +563,39 @@ assert marked.getpixel((10, h_ - 10))[0] > 200                        # the rest
 adm.post("/admin/brand", data={"csrf": csrf, "brand": "Test Studio", "accent": "#E8A317"})        # logo on downloads off again
 plain = m1.get(m1.post(f"/api/download-link/{both[0]}", json={}, headers=H).json["url"]); assert plain.mimetype == "image/png"
 print("ok  studio name, colour, logo and background change; logo is put on downloaded photos when switched on")
+
+# a logo on a white background becomes see-through; a background picture loses its empty margin
+from PIL import Image as _I, ImageDraw as _D
+import brand as _b
+_wl = _I.new("RGB", (200, 100), (255, 255, 255)); _D.Draw(_wl).rectangle((60, 30, 140, 70), fill=(0, 160, 120))
+_cl = _b.clear_background(_wl.convert("RGBA"))
+assert _cl.getpixel((2, 2))[3] == 0 and _cl.getpixel((100, 50)) == (0, 160, 120, 255)
+_tl = _I.new("RGBA", (50, 50), (0, 0, 0, 0)); assert _b.clear_background(_tl).getpixel((1, 1))[3] == 0   # already transparent: unchanged
+_wb = _I.new("RGB", (400, 400), (255, 255, 255)); _D.Draw(_wb).rectangle((100, 150, 300, 250), fill=(20, 30, 90))
+_tb = _b.trim_border(_wb); assert _tb.width < 260 and _tb.height < 160, _tb.size
+_buf = io.BytesIO(); _wl.save(_buf, "PNG"); _buf.seek(0)
+class _Up:
+    def read(self, n): return _buf.read(n)
+_tmp = _b.BRAND_DIR / "t.png"
+_b.save_image(_Up(), _tmp, 600)
+assert _I.open(_tmp).convert("RGBA").getpixel((2, 2))[3] == 0
+_tmp.unlink()
+print("ok  logo is made transparent; background picture margins are trimmed")
+# a cut-out picture (see-through background) is kept see-through and shown without a frame
+_cut = _I.new("RGBA", (400, 300), (0, 0, 0, 0)); _D.Draw(_cut).ellipse((120, 60, 280, 240), fill=(200, 50, 50, 255))
+_cb = io.BytesIO(); _cut.save(_cb, "PNG"); _cb.seek(0)
+class _Up2:
+    def read(self, n): return _cb.read(n)
+_b.save_background(_Up2())
+assert _b.has_transparent_background() and not _b.BACKGROUND.exists()
+_im = _I.open(_b.BACKGROUND_PNG); assert _im.mode == "RGBA" and _im.getpixel((0, 0))[3] == 0 and _im.size[0] < 200, _im.size
+assert pub.get("/brand/background").mimetype == "image/png"
+assert "background:none" in pub.get("/brand/theme.css").get_data(as_text=True)
+_b.remove_background()
+assert pub.get("/brand/background").status_code == 404
+print("ok  see-through background picture stays see-through")
+
+
 
 # next events and offers, before and after sign-in
 adm.post("/admin/promos", data={"csrf": csrf, "kind": "event", "title": "Diwali Mela shoot", "body": "Stall 4", "event_date": "2099-10-20",
