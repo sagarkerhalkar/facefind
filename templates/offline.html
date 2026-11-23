@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Offline - {{ brand }}</title>
+<script src="{{ url_for('static', filename='theme.js') }}"></script>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="guest">
+<main class="stage"><div class="panel"><h2>No internet</h2>
+<p class="lead">{{ brand }} needs an internet connection. Check your Wi-Fi or mobile data, then try again.</p>
+<a class="btn" href="/">Try again</a></div></main>
+</body>
+</html>

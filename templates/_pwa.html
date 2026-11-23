@@ -1,0 +1,6 @@
+<link rel="manifest" href="{{ url_for('pwa_manifest', kind=pwa_kind) }}">
+<link rel="apple-touch-icon" href="{{ url_for('pwa_icon', kind=pwa_kind, name='180') }}">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="{{ brand }}{{ ' Admin' if pwa_kind == 'admin' }}">

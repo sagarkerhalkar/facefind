@@ -1,3 +1,4 @@
+import io
 """End-to-end check of the security rules with a stand-in face engine
 (colour = person). Run:  python tests/test_flow.py"""
 import sqlite3
@@ -616,6 +617,21 @@ _b.LOGO.unlink(missing_ok=True)
 if _keep_logo: _b.LOGO.write_bytes(_keep_logo)
 _b._logo.cache_clear()
 print("ok  logo strength, size and place are set by the owner")
+# install as an app: manifests, icons and the service worker
+import json as _json
+for _k, _start, _scope in (("guest", "/", "/"), ("admin", "/admin", "/admin/")):
+    _m = pub.get(f"/pwa/{_k}.webmanifest"); _mj = _json.loads(_m.get_data(as_text=True))
+    assert _m.mimetype == "application/manifest+json" and _mj["start_url"] == _start and _mj["scope"] == _scope
+    assert _mj["display"] == "standalone" and any(i.get("purpose") == "maskable" for i in _mj["icons"])
+    for _n, _sz in (("180", 180), ("192", 192), ("512", 512), ("maskable-512", 512)):
+        _ic = _I.open(io.BytesIO(pub.get(f"/pwa/icon/{_k}/{_n}").data)); assert _ic.size == (_sz, _sz), (_k, _n, _ic.size)
+assert pub.get("/pwa/icon/guest/999").status_code == 404 and pub.get("/pwa/nope.webmanifest").status_code == 404
+_sw = pub.get("/sw.js"); assert "javascript" in _sw.mimetype and _sw.headers["Service-Worker-Allowed"] == "/" and "fetch" in _sw.get_data(as_text=True)
+assert 'rel="manifest" href="/pwa/guest.webmanifest"' in pub.get("/").get_data(as_text=True)
+assert "/pwa/admin.webmanifest" in pub.get("/admin/login").get_data(as_text=True) or "/pwa/admin.webmanifest" in adm.get("/admin").get_data(as_text=True)
+assert "No internet" in pub.get("/pwa/offline").get_data(as_text=True)
+print("ok  app can be installed on a phone (manifest, icons, service worker)")
+
 
 
 

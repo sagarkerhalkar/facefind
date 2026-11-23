@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#5b5ce6">
+{% set pwa_kind = 'admin' %}{% include '_pwa.html' %}
 <title>Sign in - {{ brand }}</title>
 <script src="{{ url_for('static', filename='theme.js') }}?v={{ static_v('theme.js') }}"></script>
 <link rel="stylesheet" href="{{ url_for('static', filename='admin.css') }}?v={{ static_v('admin.css') }}">
