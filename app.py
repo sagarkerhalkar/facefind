@@ -29,6 +29,7 @@ from itsdangerous import BadSignature, URLSafeTimedSerializer
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 import brand
+import pwa
 import config
 import db
 import faces
@@ -439,6 +440,33 @@ def brand_theme():
         css += (f":root{{--bgr:{brand.background_ratio()};}}\n"
                 f".backdrop{{background-image:url(/brand/background?v={brand.version()});}}\n")
     return app.response_class(css, mimetype="text/css")
+
+
+@app.get("/pwa/<kind>.webmanifest")
+def pwa_manifest(kind):
+    if kind not in pwa.KINDS:
+        abort(404)
+    return app.response_class(json.dumps(pwa.manifest(kind, "")), mimetype="application/manifest+json",
+                              headers={"Cache-Control": "public, max-age=3600"})
+
+
+@app.get("/pwa/icon/<kind>/<name>")
+def pwa_icon(kind, name):
+    if kind not in pwa.KINDS or name not in pwa.SIZES:
+        abort(404)
+    return app.response_class(pwa.icon_png(kind, name), mimetype="image/png",
+                              headers={"Cache-Control": "public, max-age=3600"})
+
+
+@app.get("/sw.js")
+def pwa_worker():
+    return app.response_class(pwa.SERVICE_WORKER, mimetype="text/javascript",
+                              headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"})
+
+
+@app.get("/pwa/offline")
+def pwa_offline():
+    return render_template("offline.html")
 
 
 @app.get("/brand/logo")

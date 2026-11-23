@@ -158,3 +158,4 @@ over many drives:
 | 43 | Sign-in picture shown whole (transparent PNG kept, margins trimmed); logo background made transparent; photo viewer with next/previous in the download record | brand.py, guest.html, admin.js |
 | 44 | Sign-in picture is the real page background, whole; phones show it at the top; logo clean-up works for any single-colour background | style.css, brand.py |
 | 45 | Logo on downloads: owner sets strength, size, place (Look page, live preview); phone sign-in picture stays behind the page | brand.py stamp_options, brand.html, style.css |
+| 46 | Installable phone app (PWA): manifests for guest and admin, icons from the logo, service worker, offline page | pwa.py, _pwa.html |

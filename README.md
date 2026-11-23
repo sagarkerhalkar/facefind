@@ -272,3 +272,16 @@ sometimes only the phone company's city). The Excel file has the same Place colu
 ## Logo strength on downloads
 
 Admin, Look, "Logo on downloaded photos": **Strength** (5-100, lower = fainter), **Size** (percent of the photo's long side) and **Place** (four corners or centre). A small preview shows the effect; Save applies it to every new download. Photos already downloaded do not change.
+
+## Phone app (Android and iPhone)
+
+FaceFind installs on a phone like an app: its own icon (your logo), full screen, no browser bar.
+It needs the https address (your Cloudflare domain).
+
+- Guests: open the guest address. **Android (Chrome)**: menu (three dots), **Install app**.
+  **iPhone (Safari only)**: Share button, **Add to Home Screen**.
+- Admin: open `https://your-domain/admin` and do the same. It installs as a separate "Admin" app.
+
+The app icon is made from the logo set in Admin, Look. Nothing personal is stored by the app files; photos
+and pages are always loaded fresh from the server. Real Play Store / App Store apps are a separate step
+(they need developer accounts and a Mac for iPhone); see docs/AI_HANDOFF.md.
