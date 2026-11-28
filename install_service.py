@@ -10,6 +10,7 @@ import sys
 import config
 
 TASK = "FaceFind"
+WATCHDOG = "FaceFind watchdog"
 
 
 def is_admin():
@@ -85,12 +86,50 @@ def install(port=None, elevated=False):
         print("  FaceFind will now start by itself 30 seconds after Windows starts (also after a "
               "restart or a shut down), with no one signed in, and starts again if it ever stops.")
         print("  Its messages are kept in data\\service.log.")
+    if not watchdog_task():
+        ok = False
+    if ok:                                  # start it now too, no restart needed
+        import watchdog
+        if watchdog.answers(watchdog.port(), timeout=5):
+            print("  FaceFind is already running in a window. Close that window; the watchdog")
+            print("  then starts it in the background within 10 minutes (or restart Windows).")
+        else:
+            subprocess.run(["schtasks", "/Run", "/TN", TASK], capture_output=True, text=True)
+            print("  FaceFind is starting now in the background (give it a minute).")
     return ok
 
 
+def watchdog_ps(base):
+    """PowerShell that makes Windows run watchdog.py every 5 minutes, as SYSTEM."""
+    return (
+        f"$a = New-ScheduledTaskAction -Execute '{base}\\.venv\\Scripts\\python.exe' "
+        f"-Argument '\"{base}\\watchdog.py\"' -WorkingDirectory '{base}'; "
+        "$t = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(5) "
+        "-RepetitionInterval (New-TimeSpan -Minutes 5); "
+        "$s = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 4) -StartWhenAvailable "
+        "-AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew; "
+        "$p = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest; "
+        f"Register-ScheduledTask -TaskName '{WATCHDOG}' -Action $a -Trigger $t -Settings $s -Principal $p -Force | Out-Null"
+    )
+
+
+def watchdog_task():
+    """Checks FaceFind every 5 minutes and restarts it if it has stopped answering."""
+    base = str(config.BASE).replace("'", "''")
+    r = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", watchdog_ps(base)],
+                       capture_output=True, text=True)
+    if r.returncode:
+        print("  Could not create the watchdog task:", (r.stdout or r.stderr).strip())
+        return False
+    print("  Watchdog: every 5 minutes Windows checks that FaceFind answers; if it is down at two")
+    print("  checks in a row (within 10 minutes) it is restarted by itself.")
+    return True
+
+
 def remove():
-    r = subprocess.run(["schtasks", "/Delete", "/F", "/TN", TASK], capture_output=True, text=True)
-    print("  Start-up task removed." if not r.returncode else "  " + (r.stdout or r.stderr).strip())
+    for name in (TASK, WATCHDOG):
+        r = subprocess.run(["schtasks", "/Delete", "/F", "/TN", name], capture_output=True, text=True)
+        print(f"  {name} task removed." if not r.returncode else "  " + (r.stdout or r.stderr).strip())
 
 
 if __name__ == "__main__":
