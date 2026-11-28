@@ -24,7 +24,10 @@ from the internet through a Cloudflare tunnel" and type your web address; setup 
 itself when Windows starts (also after a restart or shut down, with nobody signed in; it comes back
 up if it ever stops, and writes `data\service.log`) and to open the firewall port. Windows asks for
 Administrator permission once; or run `install-service.bat` as Administrator. To remove it run
-`python install_service.py --remove`. The default port is 8850, chosen so it does not clash with other apps.
+`python install_service.py --remove`. It also adds a **watchdog** task: every 5 minutes Windows checks that
+FaceFind answers on its port, and if it is down at two checks in a row it is stopped and started again by
+itself, so it is back within 10 minutes (`watchdog.py`, notes in `data\service.log`). Already installed? Run
+`install-service.bat` as Administrator once more to add the watchdog. The default port is 8850, chosen so it does not clash with other apps.
 
 ## The `.env` settings
 

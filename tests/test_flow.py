@@ -947,6 +947,18 @@ assert _txt.startswith("@echo off\r\n") and "run-server.bat" in _txt and str(ins
 assert open("install-service.bat", "rb").read().count(b"\r\n") >= 4 and open("run-server.bat", "rb").read().count(b"\r\n") >= 8          # CRLF, or Windows cannot run it
 assert b"pause" not in open("run-server.bat", "rb").read() and b"pip install" not in open("run-server.bat", "rb").read()   # nothing that can wait for a key at boot
 print("ok  start-on-boot helper writes a working start-up file")
+import watchdog as _wd
+_wd.STATE = tmp / "data" / "wd.json"; _wd.LOG = tmp / "data" / "wd.log"
+_rs = []
+assert _wd.check(1, ok=lambda p: True, do_restart=_rs.append) == "ok"
+assert _wd.check(1, ok=lambda p: False, do_restart=_rs.append) == "waiting" and not _rs   # one miss: wait
+assert _wd.check(1, ok=lambda p: False, do_restart=_rs.append) == "restarted" and _rs == [1]  # two misses: restart
+assert _wd.check(1, ok=lambda p: False, do_restart=_rs.append) == "waiting"                  # counting starts again
+assert _wd.check(1, ok=lambda p: True, do_restart=_rs.append) == "ok" and _wd.load_fails() == 0
+assert _wd.answers(_pt) and not _wd.answers(1, timeout=2)
+_ps = install_service.watchdog_ps("C:\\FaceFind")
+assert "watchdog.py" in _ps and "Minutes 5" in _ps and install_service.WATCHDOG in _ps
+print("ok  watchdog restarts the app after two missed checks (within 10 minutes)")
 
 import mailer as _mailer
 import smtplib as _smtplib
